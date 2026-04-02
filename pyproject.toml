@@ -1,0 +1,32 @@
+[project]
+name = "esg-reporting-agent"
+version = "0.1.0"
+description = "ESG reporting agent built with LangGraph"
+requires-python = ">=3.12"
+dependencies = [
+    "deepagents>=0.4.12",
+    "duckduckgo-search>=8.1.1",
+    "fastapi>=0.135.3",
+    "langchain-community>=0.4.1",
+    "langgraph>=1.1.4",
+    "pydantic-settings>=2.13.1",
+    "pyjwt>=2.12.1",
+    "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.22",
+    "sse-starlette>=3.3.4",
+    "uvicorn[standard]>=0.42.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]

@@ -24,3 +24,25 @@ server/logs/**
 server/logs
 .DS_Store
 **/.DS_Store
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.env
+uv.lock
+
+# Data
+data/
+*.png
+
+# Research artifacts
+deep_agent_research*
+
+# Build artifacts
+*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env

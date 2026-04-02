@@ -1,0 +1,1 @@
+"""Business logic layer (no HTTP awareness)."""

@@ -1,0 +1,1 @@
+"""API route definitions (Agent Protocol + resource CRUD)."""
