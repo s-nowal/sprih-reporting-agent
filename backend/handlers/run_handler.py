@@ -1,6 +1,12 @@
-"""Run handler with SSE streaming stub."""
+"""Run handler — orchestrates agent execution and SSE streaming.
+
+Replaces the original in-memory stub with real LangGraph agent execution.
+Thread state (``_threads`` dict) is kept in sync with agent state after
+each run so the HTTP-level ``GET /threads/{id}/state`` returns fresh data.
+"""
 
 import json
+import logging
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -10,18 +16,66 @@ from fastapi import HTTPException
 from backend.handlers.thread_handler import _assert_ownership, _threads
 from backend.schemas.runs import RunCreate, RunResponse
 from backend.security.auth import EnterpriseContext
+from backend.services import research_service
+from backend.services.langgraph_agent_service import get_agent_service
+
+logger = logging.getLogger(__name__)
 
 # In-memory store — replaced by RunService + DB later
 _runs: dict[str, dict] = {}
 
 
 def _to_response(r: dict) -> RunResponse:
+    """Convert an internal run dict to a Pydantic ``RunResponse``."""
     return RunResponse(**r)
+
+
+def _serialize_messages(messages: list) -> list[dict]:
+    """Convert LangChain BaseMessage objects to JSON-serialisable dicts.
+
+    LangGraph ``astream(stream_mode="values")`` yields state where
+    ``messages`` contains ``BaseMessage`` subclasses. These are not
+    JSON-serialisable — ``json.dumps`` would fail. This helper converts
+    each message to a plain dict the frontend can consume.
+
+    Handles both plain dicts (already serialised) and LangChain message
+    objects (``HumanMessage``, ``AIMessage``, ``ToolMessage``).
+
+    Args:
+        messages: List of LangChain ``BaseMessage`` objects or plain dicts.
+
+    Returns:
+        List of dicts, each with at least ``type``, ``id``, ``content``.
+        AI messages may also have ``tool_calls``. Tool messages have
+        ``tool_call_id`` and ``name``.
+    """
+    result = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            result.append(msg)
+            continue
+        d: dict = {
+            "type": msg.type,
+            "id": msg.id or str(uuid4()),
+            "content": msg.content,
+        }
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            d["tool_calls"] = [
+                {"id": tc["id"], "name": tc["name"], "args": tc["args"]}
+                for tc in msg.tool_calls
+            ]
+        if hasattr(msg, "tool_call_id") and msg.tool_call_id:
+            d["tool_call_id"] = msg.tool_call_id
+        if hasattr(msg, "name") and msg.name:
+            d["name"] = msg.name
+        result.append(d)
+    return result
 
 
 async def create_run(
     thread_id: str, data: RunCreate, enterprise: EnterpriseContext
 ) -> RunResponse:
+    """Create a run record (non-streaming). Kept for API compatibility."""
     _assert_ownership(thread_id, enterprise)
     now = datetime.now(timezone.utc)
     run_id = str(uuid4())
@@ -40,18 +94,40 @@ async def create_run(
 
 
 async def stream_run(
-    thread_id: str, data: RunCreate, enterprise: EnterpriseContext
+    thread_id: str,
+    data: RunCreate,
+    enterprise: EnterpriseContext,
+    *,
+    run_id: str,
 ) -> AsyncGenerator[dict, None]:
-    """Yield SSE events. Stub returns a canned AI response.
+    """Stream real agent execution as SSE events.
 
-    Production flow:
-      1. ThreadService.get(thread_id) — verify + load state
-      2. RunService.create(...) — persist run record
-      3. AgentService.stream(...) — invoke langgraph graph.astream()
-      4. yield SSE events from agent execution
+    Orchestration flow:
+    1. Record the run in the in-memory ``_runs`` store.
+    2. Create a ``jobs`` row in MariaDB for provenance tracking.
+    3. Delegate to ``LangGraphAgentService.stream()`` which runs the agent.
+    4. For each state yielded by the graph, serialise messages and yield
+       an SSE ``values`` event.
+    5. On completion, sync the final messages back to the in-memory
+       ``_threads`` store so ``GET /threads/{id}/state`` is up-to-date.
+    6. On error, yield an SSE ``error`` event and mark the job as failed.
+
+    Yields dicts compatible with ``sse-starlette``'s ``EventSourceResponse``:
+    ``{"event": "<name>", "data": "<json-string>"}``
+
+    Args:
+        thread_id: The conversation thread to run against.
+        data: ``RunCreate`` schema with ``input``, ``assistant_id``,
+            and optional ``command`` for interrupt resume.
+        enterprise: Authenticated tenant context from JWT / dev header.
+        run_id: Pre-generated UUID (created by the router for the
+            ``Content-Location`` header).
+
+    Yields:
+        SSE event dicts: ``metadata`` → N × ``values`` → ``end``
+        (or ``error`` → ``end`` on failure).
     """
     t = _assert_ownership(thread_id, enterprise)
-    run_id = str(uuid4())
     now = datetime.now(timezone.utc)
 
     _runs[run_id] = {
@@ -64,52 +140,92 @@ async def stream_run(
         "metadata": data.metadata or {},
     }
 
-    # Event 1: metadata
-    yield {"event": "metadata", "data": json.dumps({"run_id": run_id})}
-
-    # Determine response text
-    if data.command and data.command.get("resume") is not None:
-        content = "Acknowledged. Resuming from where we left off. (stub)"
-    else:
-        user_msg = ""
-        if data.input and "messages" in data.input:
-            msgs = data.input["messages"]
-            if msgs:
-                last = msgs[-1]
-                user_msg = last.get("content", "") if isinstance(last, dict) else ""
-        content = (
-            f'Received: "{user_msg}". '
-            "This is a stub response — agent execution is not wired yet."
-        )
-
-    # Append to thread state
-    messages = t["values"].get("messages", [])
-    if data.input and "messages" in data.input:
-        messages.extend(data.input["messages"])
-    ai_message = {
-        "type": "ai",
-        "id": str(uuid4()),
-        "content": content,
-    }
-    messages.append(ai_message)
-    t["values"]["messages"] = messages
-    t["updated_at"] = now
-
-    # Event 2: values (full state after step)
+    # --- Metadata event (required by SDK) ------------------------------------
     yield {
-        "event": "values",
-        "data": json.dumps({"messages": messages}),
+        "event": "metadata",
+        "data": json.dumps({"run_id": run_id, "thread_id": thread_id}),
     }
 
-    # Event 3: end
-    _runs[run_id]["status"] = "success"
-    _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
+    # --- Create a research job for provenance --------------------------------
+    job_id: str | None = None
+    try:
+        job_id = await research_service.create_research_job(
+            enterprise_id=enterprise.enterprise_id,
+            thread_id=thread_id,
+        )
+    except Exception as e:
+        logger.warning("Failed to create research job: %s", e)
+
+    # --- Stream from agent ---------------------------------------------------
+    agent_service = get_agent_service()
+    command = None
+    input_data = data.input
+    if data.command and data.command.get("resume") is not None:
+        command = data.command
+        input_data = None
+
+    last_state: dict | None = None
+
+    try:
+        async for state in agent_service.stream(
+            graph_name=data.assistant_id,
+            thread_id=thread_id,
+            input_data=input_data,
+            enterprise_id=enterprise.enterprise_id,
+            research_job_id=job_id,
+            command=command,
+        ):
+            last_state = state
+            messages = _serialize_messages(state.get("messages", []))
+            yield {
+                "event": "values",
+                "data": json.dumps({"messages": messages}),
+            }
+
+        # --- Sync thread state -----------------------------------------------
+        if last_state:
+            t["values"]["messages"] = _serialize_messages(
+                last_state.get("messages", [])
+            )
+            t["updated_at"] = datetime.now(timezone.utc)
+
+        _runs[run_id]["status"] = "success"
+        _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
+
+        if job_id:
+            await research_service.update_job_status(job_id, "completed")
+
+    except Exception as e:
+        logger.exception("Agent execution failed for run %s", run_id)
+        _runs[run_id]["status"] = "error"
+        _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
+        if job_id:
+            await research_service.update_job_status(job_id, "failed")
+        yield {
+            "event": "error",
+            "data": json.dumps({"error": type(e).__name__, "message": str(e)}),
+        }
+
+    # --- End event -----------------------------------------------------------
     yield {"event": "end", "data": "null"}
 
 
 async def get_run(
     thread_id: str, run_id: str, enterprise: EnterpriseContext
 ) -> RunResponse:
+    """Fetch a single run record by id.
+
+    Args:
+        thread_id: Must match the run's thread (ownership check).
+        run_id: The run to look up.
+        enterprise: Authenticated tenant context.
+
+    Returns:
+        ``RunResponse`` for the requested run.
+
+    Raises:
+        HTTPException 404: If run not found or belongs to a different thread.
+    """
     _assert_ownership(thread_id, enterprise)
     r = _runs.get(run_id)
     if not r or r["thread_id"] != thread_id:
@@ -120,6 +236,19 @@ async def get_run(
 async def cancel_run(
     thread_id: str, run_id: str, enterprise: EnterpriseContext
 ) -> RunResponse:
+    """Mark a run as interrupted (best-effort cancellation).
+
+    Args:
+        thread_id: Must match the run's thread.
+        run_id: The run to cancel.
+        enterprise: Authenticated tenant context.
+
+    Returns:
+        Updated ``RunResponse`` with ``status="interrupted"``.
+
+    Raises:
+        HTTPException 404: If run not found or belongs to a different thread.
+    """
     _assert_ownership(thread_id, enterprise)
     r = _runs.get(run_id)
     if not r or r["thread_id"] != thread_id:

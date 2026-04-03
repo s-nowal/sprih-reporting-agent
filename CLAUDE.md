@@ -69,3 +69,17 @@ Router (validate + auth) → Handler (orchestrate) → Service (execute)
 
 ## Agent Protocol
 The threads/runs/assistants API follows the LangGraph Platform API spec. Any client using `@langchain/langgraph-sdk` works against it. Custom business endpoints (`/sources`, `/artifacts`) are separate.
+
+## Documentation standard
+
+### Docstrings
+Every module, class, and public function **must** have a docstring that includes:
+- **Summary**: one-line description of what it does (logic, not just the name restated)
+- **Args**: each parameter with type and meaning
+- **Returns**: what is returned and its structure
+- **Raises**: any exceptions the caller should expect
+
+Use Google-style docstrings. Keep them factual — describe logic, not aspirations.
+
+### Inline comments
+Add comments at major flow steps so a reader can follow the function's logic without reading every line. Use `# --- Section name ---` separators for distinct phases within long functions.

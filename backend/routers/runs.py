@@ -1,5 +1,7 @@
 """Run execution endpoints with SSE streaming (Agent Protocol compatible)."""
 
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, Response
 from sse_starlette.sse import EventSourceResponse
 
@@ -42,12 +44,18 @@ async def stream_run(
     enterprise: EnterpriseContext = Depends(get_enterprise_context),
 ):
     """Start a run and stream results as Server-Sent Events."""
+    run_id = str(uuid4())
 
     async def event_generator():
-        async for event in run_handler.stream_run(thread_id, data, enterprise):
+        async for event in run_handler.stream_run(
+            thread_id, data, enterprise, run_id=run_id
+        ):
             yield event
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(
+        event_generator(),
+        headers={"Content-Location": f"/threads/{thread_id}/runs/{run_id}"},
+    )
 
 
 @router.get(

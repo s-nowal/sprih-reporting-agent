@@ -19,5 +19,15 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
     debug: bool = True
 
+    # Database (MariaDB)
+    db_host: str = "localhost"
+    db_port: int = 3306
+    db_name: str = "esg"
+    db_user: str = "root"
+    db_password: str = "dev"
+
+    # Storage (local filesystem simulating S3)
+    storage_root: str = "./data/s3"
+
 
 settings = Settings()
