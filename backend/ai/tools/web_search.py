@@ -12,14 +12,14 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from backend.services import research_service
+from backend.services import ingestion_service
 
 logger = logging.getLogger(__name__)
 
 
 @tool
 async def web_search(
-    query: str,
+    search_query_text: str,
     num_results: int = 5,
     *,
     config: RunnableConfig,
@@ -31,12 +31,12 @@ async def web_search(
     table for provenance tracking.
 
     Args:
-        query: The search query string.
+        search_query_text: The search query string.
         num_results: Maximum number of results to return (default 5).
 
     Returns:
         dict with keys:
-        - ``query_id`` (str | None): UUID of the recorded query, or ``None``
+        - ``search_query_id`` (str | None): UUID of the recorded query, or ``None``
           if recording failed or no ``research_job_id`` was in config.
         - ``results`` (list[dict]): Each entry has ``url``, ``title``, ``snippet``.
         - ``error`` (str): Present only on failure, describes what went wrong.
@@ -49,11 +49,11 @@ async def web_search(
         from tavily import AsyncTavilyClient
 
         client = AsyncTavilyClient()
-        response = await client.search(query, max_results=num_results)
+        response = await client.search(search_query_text, max_results=num_results)
         raw_results = response.get("results", [])
     except Exception as e:
-        logger.warning("web_search failed for query=%r: %s", query, e)
-        return {"query_id": None, "error": str(e), "results": []}
+        logger.warning("web_search failed for query=%r: %s", search_query_text, e)
+        return {"search_query_id": None, "error": str(e), "results": []}
 
     # --- Normalise Tavily response into uniform format -----------------------
     # Tavily returns: {"title", "url", "content" (snippet), "score", ...}
@@ -68,12 +68,12 @@ async def web_search(
     ]
 
     # --- Record the query in DB for provenance tracking ----------------------
-    query_id: str | None = None
+    search_query_id: str | None = None
     if research_job_id:
-        query_id = await research_service.record_query(
+        search_query_id = await ingestion_service.record_search_query(
             research_job_id=research_job_id,
-            query_text=query,
+            search_query_text=search_query_text,
             results_count=len(results),
         )
 
-    return {"query_id": query_id, "results": results}
+    return {"search_query_id": search_query_id, "results": results}

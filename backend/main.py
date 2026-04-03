@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     from backend.infra.db import close_db, get_session_factory, init_db
     from backend.infra.registry import init_registry
     from backend.infra.storage import LocalStorage
-    from backend.services.langgraph_agent_service import init_agent_service
+    from backend.services.agent import init_agent_service
 
     logger.info("Initialising database…")
     await init_db()

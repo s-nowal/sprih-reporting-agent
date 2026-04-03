@@ -1,29 +1,25 @@
-"""Web crawl tool — fetches a URL and persists to bronze storage.
+"""Web crawl tool — fetches a URL and delegates persistence to ingestion_service.
 
 For web pages: uses Tavily Extract to get clean markdown content.
 For PDFs / other binaries: uses httpx to download raw bytes (conversion
 handled separately by the Extraction Agent / Parser Agent).
 
-Delegates all DB operations to ``research_service``.
+The tool itself only fetches — all storage writes and DB operations are
+handled by ``ingestion_service``.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from backend.infra.registry import get_storage
-from backend.services import research_service
+from backend.services import ingestion_service
 
 logger = logging.getLogger(__name__)
-
-PREVIEW_LENGTH = 500
 
 
 async def _extract_with_tavily(url: str) -> str | None:
@@ -103,10 +99,10 @@ async def web_crawl(
 
     Routing logic:
     - Binary URLs (.pdf, .xlsx, …) → ``httpx`` download → raw bytes to bronze.
-    - Web pages → Tavily Extract → markdown ``content.md`` to bronze.
+    - Web pages → Tavily Extract → markdown to bronze.
 
-    Both paths write a ``meta.json`` sidecar and create a ``data_sources`` row
-    via ``research_service.record_source``.
+    The tool only fetches content — all storage writes and DB operations
+    are delegated to ``ingestion_service``.
 
     Args:
         url: The URL to fetch.
@@ -128,94 +124,38 @@ async def web_crawl(
         "enterprise_id", "dev-enterprise"
     )
     research_job_id: str | None = config.get("configurable", {}).get("research_job_id")
-    storage = get_storage()
 
     # --- Deduplication: skip if same URL already crawled in this job ----------
-    dup = await research_service.check_duplicate(url, research_job_id)
+    dup = await ingestion_service.check_duplicate(url, research_job_id)
     if dup:
         return dup
 
-    now = datetime.now(timezone.utc)
-
-    # =========================================================================
-    # PATH A: Binary content (PDF, Excel, etc.) — download raw bytes
-    # =========================================================================
+    # --- PATH A: Binary content (PDF, Excel, etc.) ---------------------------
     if _is_binary_url(url):
         result = await _download_binary(url)
         if result is None:
             return {"source_id": None, "error": "Failed to download binary", "url": url}
 
         raw_bytes, content_type, http_status = result
-        ext = url.rsplit(".", 1)[-1].lower() if "." in url else "bin"
-        source_type = f"web_{ext}"  # web_pdf, web_xlsx, etc.
-
-        # Record in DB first to get source_id for the storage path
-        bronze_dir = f"enterprise/{enterprise_id}/bronze"
-        source_id = await research_service.record_source(
+        return await ingestion_service.store_binary(
             enterprise_id=enterprise_id,
             research_job_id=research_job_id,
             research_query_id=query_id,
-            source_ref=url,
-            source_type=source_type,
-            s3_bronze_path=f"{bronze_dir}/{source_id}/",
+            url=url,
+            raw_bytes=raw_bytes,
+            content_type=content_type,
+            http_status=http_status,
         )
 
-        # Write the raw binary + metadata sidecar
-        storage.write(f"{bronze_dir}/{source_id}/original.{ext}", raw_bytes)
-        meta = {
-            "source_ref": url,
-            "source_type": source_type,
-            "http_status": http_status,
-            "content_type": content_type,
-            "content_length": len(raw_bytes),
-            "crawled_at": now.isoformat(),
-        }
-        storage.write_text(
-            f"{bronze_dir}/{source_id}/meta.json", json.dumps(meta, indent=2)
-        )
-
-        preview = f"({ext.upper()} downloaded, {len(raw_bytes)} bytes — pending extraction)"
-        return {
-            "source_id": source_id,
-            "s3_bronze_path": f"{bronze_dir}/{source_id}/",
-            "source_type": source_type,
-            "preview": preview,
-        }
-
-    # =========================================================================
-    # PATH B: Web page — extract as markdown via Tavily
-    # =========================================================================
+    # --- PATH B: Web page — extract markdown via Tavily ----------------------
     markdown = await _extract_with_tavily(url)
     if markdown is None:
         return {"source_id": None, "error": "Failed to extract page content", "url": url}
 
-    # Record in DB first to get source_id for the storage path
-    bronze_dir = f"enterprise/{enterprise_id}/bronze"
-    source_id = await research_service.record_source(
+    return await ingestion_service.store_page(
         enterprise_id=enterprise_id,
         research_job_id=research_job_id,
         research_query_id=query_id,
-        source_ref=url,
-        source_type="web_page",
-        s3_bronze_path=f"{bronze_dir}/{source_id}/",
+        url=url,
+        markdown_content=markdown,
     )
-
-    # Write markdown content + metadata sidecar
-    storage.write_text(f"{bronze_dir}/{source_id}/content.md", markdown)
-    meta = {
-        "source_ref": url,
-        "source_type": "web_page",
-        "content_length": len(markdown),
-        "crawled_at": now.isoformat(),
-    }
-    storage.write_text(
-        f"{bronze_dir}/{source_id}/meta.json", json.dumps(meta, indent=2)
-    )
-
-    preview = markdown[:PREVIEW_LENGTH].strip()
-    return {
-        "source_id": source_id,
-        "s3_bronze_path": f"{bronze_dir}/{source_id}/",
-        "source_type": "web_page",
-        "preview": preview,
-    }

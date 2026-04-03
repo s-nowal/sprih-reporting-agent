@@ -43,7 +43,17 @@ async def stream_run(
     data: RunCreate,
     enterprise: EnterpriseContext = Depends(get_enterprise_context),
 ):
-    """Start a run and stream results as Server-Sent Events."""
+    """Start a run and stream results as Server-Sent Events.
+
+    Thread ownership is validated here (before entering the SSE generator)
+    so that a missing/wrong thread returns a clean 404 instead of crashing
+    inside the async generator where FastAPI can't catch HTTPException.
+    """
+    # Validate thread exists and belongs to this enterprise BEFORE streaming.
+    # HTTPException raised here is handled normally by FastAPI.
+    from backend.handlers.thread_handler import _assert_ownership
+    _assert_ownership(thread_id, enterprise)
+
     run_id = str(uuid4())
 
     async def event_generator():

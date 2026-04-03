@@ -30,13 +30,30 @@ Copy `.env.example` to `.env` and fill in:
 ## Backend structure
 ```
 backend/
-  main.py               # FastAPI app, CORS, router registration
-  config.py             # Settings (env prefix: SPRIH_)
-  security/auth.py      # JWT decode → EnterpriseContext dependency
-  routers/              # HTTP layer only
-  schemas/              # Pydantic models
-  handlers/             # Orchestration
-  services/             # Business logic (DB, S3, agent execution)
+  main.py                   # FastAPI app, CORS, router registration
+  config.py                 # Settings (env prefix: SPRIH_)
+  security/auth.py          # JWT decode → EnterpriseContext dependency
+  routers/                  # HTTP layer only
+  schemas/                  # Pydantic models
+  handlers/                 # Orchestration (in-memory stubs for now)
+  services/
+    agent/                  # Agent execution package (THE SWAP POINT)
+      base.py               # Abstract AgentService interface
+      langgraph_service.py  # LangGraph implementation + singleton
+    job_service.py          # Job lifecycle (jobs table CRUD)
+    source_service.py       # Source document operations
+    artifact_service.py     # Artifact operations
+    thread_service.py       # Thread operations
+    ingestion_service.py    # Ingestion pipeline
+  models/                   # SQLAlchemy ORM models
+  infra/
+    db.py                   # Async SQLAlchemy engine + session factory
+    registry.py             # Module-level singletons (storage, session_factory)
+    storage.py              # LocalStorage (S3 adapter for sandbox)
+  ai/
+    agents/research_agent.py   # LangGraph research agent
+    tools/                     # Agent-callable tools (web_search, web_crawl)
+    prompts/                   # System prompts by consumer type
 ```
 
 ## Architecture rules

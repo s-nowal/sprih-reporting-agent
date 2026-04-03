@@ -16,8 +16,8 @@ from fastapi import HTTPException
 from backend.handlers.thread_handler import _assert_ownership, _threads
 from backend.schemas.runs import RunCreate, RunResponse
 from backend.security.auth import EnterpriseContext
-from backend.services import research_service
-from backend.services.langgraph_agent_service import get_agent_service
+from backend.services import job_service, workspace_service
+from backend.services.agent import get_agent_service
 
 logger = logging.getLogger(__name__)
 
@@ -146,15 +146,22 @@ async def stream_run(
         "data": json.dumps({"run_id": run_id, "thread_id": thread_id}),
     }
 
-    # --- Create a research job for provenance --------------------------------
+    # --- Create a job for provenance ------------------------------------------
     job_id: str | None = None
     try:
-        job_id = await research_service.create_research_job(
+        job_id = await job_service.create_job(
             enterprise_id=enterprise.enterprise_id,
+            job_type=data.assistant_id,
             thread_id=thread_id,
         )
     except Exception as e:
-        logger.warning("Failed to create research job: %s", e)
+        logger.warning("Failed to create job: %s", e)
+
+    # --- Checkout workspace (isolated temp dir) ------------------------------
+    temp_workspace = await workspace_service.checkout(
+        enterprise_id=enterprise.enterprise_id,
+        thread_id=thread_id,
+    )
 
     # --- Stream from agent ---------------------------------------------------
     agent_service = get_agent_service()
@@ -174,6 +181,7 @@ async def stream_run(
             enterprise_id=enterprise.enterprise_id,
             research_job_id=job_id,
             command=command,
+            workspace_root=temp_workspace,
         ):
             last_state = state
             messages = _serialize_messages(state.get("messages", []))
@@ -192,19 +200,30 @@ async def stream_run(
         _runs[run_id]["status"] = "success"
         _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
 
+        # --- Commit workspace to S3 ------------------------------------------
+        await workspace_service.commit(
+            enterprise_id=enterprise.enterprise_id,
+            thread_id=thread_id,
+            temp_dir=temp_workspace,
+        )
+
         if job_id:
-            await research_service.update_job_status(job_id, "completed")
+            await job_service.update_status(job_id, "completed")
 
     except Exception as e:
         logger.exception("Agent execution failed for run %s", run_id)
         _runs[run_id]["status"] = "error"
         _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
         if job_id:
-            await research_service.update_job_status(job_id, "failed")
+            await job_service.update_status(job_id, "failed")
         yield {
             "event": "error",
             "data": json.dumps({"error": type(e).__name__, "message": str(e)}),
         }
+
+    finally:
+        # --- Always clean up temp workspace ----------------------------------
+        await workspace_service.cleanup(temp_workspace)
 
     # --- End event -----------------------------------------------------------
     yield {"event": "end", "data": "null"}

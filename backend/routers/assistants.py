@@ -9,6 +9,15 @@ from backend.schemas.assistants import AssistantResponse, AssistantSearch
 router = APIRouter(tags=["assistants"])
 
 ASSISTANTS: dict[str, AssistantResponse] = {
+    "research-agent": AssistantResponse(
+        assistant_id="research-agent",
+        graph_id="research-agent",
+        name="ESG Research Agent",
+        config={},
+        metadata={"created_by": "system"},
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    ),
     "reporting-agent": AssistantResponse(
         assistant_id="reporting-agent",
         graph_id="reporting-agent",
