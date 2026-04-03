@@ -1,19 +1,19 @@
-"""Document upload/listing handler with in-memory stub."""
+"""Source document upload/listing handler with in-memory stub."""
 
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
 
-from backend.schemas.documents import DocumentResponse, DocumentUploadResponse
+from backend.schemas.sources import SourceResponse, SourceUploadResponse
 from backend.security.auth import EnterpriseContext
 
-_documents: dict[str, dict] = {}
+_sources: dict[str, dict] = {}
 
 
-async def upload_documents(
+async def upload_sources(
     files: list[UploadFile], enterprise: EnterpriseContext
-) -> list[DocumentUploadResponse]:
+) -> list[SourceUploadResponse]:
     results = []
     now = datetime.now(timezone.utc)
     for f in files:
@@ -43,27 +43,27 @@ async def upload_documents(
             "created_at": now,
             "metadata": {"content_type": f.content_type, "size": f.size},
         }
-        _documents[doc_id] = doc
-        results.append(DocumentUploadResponse(**doc))
+        _sources[doc_id] = doc
+        results.append(SourceUploadResponse(**doc))
     return results
 
 
-async def list_documents(
+async def list_sources(
     enterprise: EnterpriseContext, limit: int = 50, offset: int = 0
-) -> list[DocumentResponse]:
+) -> list[SourceResponse]:
     docs = [
         d
-        for d in _documents.values()
+        for d in _sources.values()
         if d["enterprise_id"] == enterprise.enterprise_id
     ]
     docs.sort(key=lambda x: x["created_at"], reverse=True)
-    return [DocumentResponse(**d) for d in docs[offset : offset + limit]]
+    return [SourceResponse(**d) for d in docs[offset : offset + limit]]
 
 
-async def get_document(
-    document_id: str, enterprise: EnterpriseContext
-) -> DocumentResponse:
-    doc = _documents.get(document_id)
+async def get_source(
+    source_id: str, enterprise: EnterpriseContext
+) -> SourceResponse:
+    doc = _sources.get(source_id)
     if not doc or doc["enterprise_id"] != enterprise.enterprise_id:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return DocumentResponse(**doc)
+        raise HTTPException(status_code=404, detail="Source not found")
+    return SourceResponse(**doc)

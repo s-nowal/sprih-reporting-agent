@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
-from backend.routers import assistants, deliverables, documents, runs, threads
+from backend.routers import artifacts, assistants, runs, sources, threads
 
 app = FastAPI(
     title="ESG Reporting Platform",
@@ -23,8 +23,8 @@ app.add_middleware(
 app.include_router(assistants.router)
 app.include_router(threads.router)
 app.include_router(runs.router)
-app.include_router(documents.router)
-app.include_router(deliverables.router)
+app.include_router(sources.router)
+app.include_router(artifacts.router)
 
 
 @app.get("/health")

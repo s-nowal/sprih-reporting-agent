@@ -1,9 +1,7 @@
-"""Document upload and storage service — interface for S3 + DB implementation."""
-
-from typing import Any
+"""Source document service — interface for S3 + DB implementation."""
 
 
-class DocumentService:
+class SourceService:
     async def store(self, enterprise_id: str, filename: str, content: bytes) -> dict:
         raise NotImplementedError
 
@@ -12,5 +10,5 @@ class DocumentService:
     ) -> list[dict]:
         raise NotImplementedError
 
-    async def get(self, document_id: str) -> dict:
+    async def get(self, source_id: str) -> dict:
         raise NotImplementedError

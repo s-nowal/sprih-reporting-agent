@@ -1,17 +1,15 @@
-"""Deliverable lifecycle service — interface for DB + S3 implementation."""
-
-from typing import Any
+"""Artifact lifecycle service — interface for DB + S3 implementation."""
 
 
-class DeliverableService:
+class ArtifactService:
     async def list(
         self, enterprise_id: str, thread_id: str | None = None,
         limit: int = 50, offset: int = 0,
     ) -> list[dict]:
         raise NotImplementedError
 
-    async def get(self, deliverable_id: str) -> dict:
+    async def get(self, artifact_id: str) -> dict:
         raise NotImplementedError
 
-    async def download(self, deliverable_id: str) -> bytes:
+    async def download(self, artifact_id: str) -> bytes:
         raise NotImplementedError

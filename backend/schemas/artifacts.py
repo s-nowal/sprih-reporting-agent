@@ -1,4 +1,4 @@
-"""Deliverable (reports, questionnaires, etc.) response models."""
+"""Artifact (generated reports, questionnaires, etc.) response models."""
 
 from datetime import datetime
 from typing import Any
@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class DeliverableResponse(BaseModel):
+class ArtifactResponse(BaseModel):
     id: str
     thread_id: str | None = None
     enterprise_id: str

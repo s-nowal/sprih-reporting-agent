@@ -1,4 +1,4 @@
-"""Data source / document request/response models."""
+"""Source document request/response models."""
 
 from datetime import datetime
 from typing import Any
@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class DocumentUploadResponse(BaseModel):
+class SourceUploadResponse(BaseModel):
     id: str
     enterprise_id: str
     source_type: str
@@ -15,7 +15,7 @@ class DocumentUploadResponse(BaseModel):
     created_at: datetime
 
 
-class DocumentResponse(BaseModel):
+class SourceResponse(BaseModel):
     id: str
     enterprise_id: str
     entity_id: str | None = None
