@@ -2,6 +2,11 @@
 
 No entity_id or s3_silver_path — those are extraction concerns.
 Backlinks from extraction records point here via source_id.
+
+When a URL is fetched for the first time ``origin_source_id`` is NULL — that
+row is the canonical source. On subsequent fetches of the same URL across
+different jobs, a new row is created with ``origin_source_id`` pointing to
+the canonical row so downstream agents can reuse existing extraction results.
 """
 
 from datetime import datetime
@@ -17,11 +22,15 @@ class DataSource(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     enterprise_id: Mapped[str] = mapped_column(String(36))
-    research_job_id: Mapped[str | None] = mapped_column(
+    job_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("jobs.id"), nullable=True
     )
-    research_query_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("research_queries.id"), nullable=True
+    search_result_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("search_results.id"), nullable=True
+    )
+    # NULL on the canonical row; set on cross-job dedup rows.
+    origin_source_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("data_sources.id"), nullable=True
     )
     source_type: Mapped[str] = mapped_column(String(30))  # web_page, web_pdf, etc.
     source_ref: Mapped[str] = mapped_column(String(2048))  # URL or filename
@@ -30,4 +39,7 @@ class DataSource(Base):
     fetched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    __table_args__ = (Index("ix_data_sources_enterprise_id", "enterprise_id"),)
+    __table_args__ = (
+        Index("ix_data_sources_enterprise_id", "enterprise_id"),
+        Index("ix_data_sources_enterprise_source_ref", "enterprise_id", "source_ref"),
+    )

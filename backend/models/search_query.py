@@ -1,4 +1,4 @@
-"""ResearchQuery model — tracks each web search the Research Agent performs."""
+"""SearchQuery model — tracks each web search query issued by any agent."""
 
 from datetime import datetime
 
@@ -8,11 +8,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from backend.models.base import Base
 
 
-class ResearchQuery(Base):
-    __tablename__ = "research_queries"
+class SearchQuery(Base):
+    __tablename__ = "search_queries"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    research_job_id: Mapped[str] = mapped_column(
+    job_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("jobs.id"), index=True
     )
     query_text: Mapped[str] = mapped_column(Text)

@@ -179,7 +179,7 @@ async def stream_run(
             thread_id=thread_id,
             input_data=input_data,
             enterprise_id=enterprise.enterprise_id,
-            research_job_id=job_id,
+            job_id=job_id,
             command=command,
             workspace_root=temp_workspace,
         ):

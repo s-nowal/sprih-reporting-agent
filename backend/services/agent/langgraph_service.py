@@ -99,7 +99,7 @@ class LangGraphAgentService(AgentService):
         input_data: dict[str, Any],
         *,
         enterprise_id: str = "dev-enterprise",
-        research_job_id: str | None = None,
+        job_id: str | None = None,
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
         """Invoke the graph and return the final state (non-streaming).
@@ -109,7 +109,7 @@ class LangGraphAgentService(AgentService):
             thread_id: Conversation thread for checkpointer state.
             input_data: Message dict passed to the graph (``{"messages": [...]}``)
             enterprise_id: Tenant id injected into tool config.
-            research_job_id: Job id injected into tool config for provenance.
+            job_id: Job id injected into tool config for provenance.
             workspace_root: Temp workspace path. Required for workspace-dependent
                 graphs (e.g. ``"reporting-agent"``).
 
@@ -120,7 +120,7 @@ class LangGraphAgentService(AgentService):
             ValueError: If ``graph_name`` is not registered.
         """
         graph = self._get_graph(graph_name, workspace_root=workspace_root)
-        config = self._make_config(thread_id, enterprise_id, research_job_id)
+        config = self._make_config(thread_id, enterprise_id, job_id)
         return await graph.ainvoke(input_data, config)
 
     async def stream(
@@ -130,7 +130,7 @@ class LangGraphAgentService(AgentService):
         input_data: dict[str, Any] | None = None,
         *,
         enterprise_id: str = "dev-enterprise",
-        research_job_id: str | None = None,
+        job_id: str | None = None,
         command: dict[str, Any] | None = None,
         workspace_root: Path | None = None,
     ) -> AsyncGenerator[dict, None]:
@@ -148,7 +148,7 @@ class LangGraphAgentService(AgentService):
             thread_id: Conversation thread for checkpointer state.
             input_data: Message dict (ignored when ``command`` is set).
             enterprise_id: Tenant id injected into tool config.
-            research_job_id: Job id injected into tool config for provenance.
+            job_id: Job id injected into tool config for provenance.
             command: Resume payload (``{"resume": <value>}``). When set,
                 ``input_data`` is ignored and a ``Command`` is sent instead.
             workspace_root: Temp workspace path. Required for workspace-dependent
@@ -161,7 +161,7 @@ class LangGraphAgentService(AgentService):
             ValueError: If ``graph_name`` is not registered.
         """
         graph = self._get_graph(graph_name, workspace_root=workspace_root)
-        config = self._make_config(thread_id, enterprise_id, research_job_id)
+        config = self._make_config(thread_id, enterprise_id, job_id)
 
         agent_input: Any
         if command and command.get("resume") is not None:
@@ -179,7 +179,7 @@ class LangGraphAgentService(AgentService):
         value: Any,
         *,
         enterprise_id: str = "dev-enterprise",
-        research_job_id: str | None = None,
+        job_id: str | None = None,
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
         """Resume a graph from an interrupt with the given value.
@@ -189,14 +189,14 @@ class LangGraphAgentService(AgentService):
             thread_id: Conversation thread to resume.
             value: The user's response to the interrupt prompt.
             enterprise_id: Tenant id injected into tool config.
-            research_job_id: Job id injected into tool config.
+            job_id: Job id injected into tool config.
             workspace_root: Temp workspace path for workspace-dependent graphs.
 
         Returns:
             The final state dict from the resumed graph.
         """
         graph = self._get_graph(graph_name, workspace_root=workspace_root)
-        config = self._make_config(thread_id, enterprise_id, research_job_id)
+        config = self._make_config(thread_id, enterprise_id, job_id)
         return await graph.ainvoke(Command(resume=value), config)
 
     # -- Helpers ---------------------------------------------------------------
@@ -205,7 +205,7 @@ class LangGraphAgentService(AgentService):
     def _make_config(
         thread_id: str,
         enterprise_id: str,
-        research_job_id: str | None,
+        job_id: str | None,
     ) -> dict:
         """Build the LangGraph ``RunnableConfig`` with per-request values.
 
@@ -215,7 +215,7 @@ class LangGraphAgentService(AgentService):
         Args:
             thread_id: Used by the checkpointer to scope conversation state.
             enterprise_id: Tenant id — scopes storage paths and DB rows.
-            research_job_id: Links tool outputs to a parent job for provenance.
+            job_id: Links tool outputs to a parent job for provenance.
 
         Returns:
             A dict suitable for passing as the ``config`` arg to ``graph.ainvoke``
@@ -225,7 +225,7 @@ class LangGraphAgentService(AgentService):
             "configurable": {
                 "thread_id": thread_id,
                 "enterprise_id": enterprise_id,
-                "research_job_id": research_job_id,
+                "job_id": job_id,
             }
         }
 
