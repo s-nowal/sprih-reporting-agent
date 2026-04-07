@@ -1,17 +1,17 @@
-"""Ingestion service — persists crawled/searched content to bronze storage and DB.
+"""Ingestion service — persists crawled content to bronze storage and DB.
 
-Owns the full provenance pipeline that any search or crawl tool uses:
-- ``record_query``: log a search query in ``search_queries``
+Owns the bronze storage pipeline:
 - ``store_page``: save web page markdown to bronze + create ``data_sources`` row
 - ``store_binary``: save binary file (PDF, XLSX, …) to bronze + create ``data_sources`` row
-- ``check_duplicate``: skip re-fetching the same URL within a job
+- ``check_duplicate``: skip re-fetching a URL that has already been stored
 
-This service is agent-agnostic — the Research Agent, Reporting Agent, or any
-future agent's tools can call it.
+Search query provenance (recording queries, resolving result IDs) lives in
+``search_service``. This service is agent-agnostic.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -22,137 +22,119 @@ from sqlalchemy import select
 
 from backend.infra.registry import get_session_factory, get_storage
 from backend.models.data_source import DataSource
-from backend.models.search_query import SearchQuery
-from backend.models.search_result import SearchResult
 
 logger = logging.getLogger(__name__)
 
-PREVIEW_LENGTH = 500
+PREVIEW_LENGTH = 2000
 
 
-async def record_search_query(
-    job_id: str,
-    search_query_text: str,
-    results: list[dict],
-) -> tuple[str, list[dict]]:
-    """Insert a ``search_queries`` row and one ``search_results`` row per organic result.
+def _extract_pdf_sync(
+    raw_bytes: bytes,
+) -> tuple[str, int, list[tuple[int, int, str, bytes, int, int]]]:
+    """Extract text and images from a PDF synchronously using pymupdf.
 
-    Each result gets a UUID (``result_id``) that the agent passes to
-    ``web_fetch`` instead of a raw URL, making fetches fully traceable.
+    Intended to run in a thread via ``asyncio.to_thread`` so it doesn't block
+    the event loop. Processes every page of the document.
 
     Args:
-        job_id: FK to the parent job in the ``jobs`` table.
-        search_query_text: The exact query string sent to the search API.
-        results: Organic results from the search API. Each dict must have
-            ``url``; ``title``, ``snippet``, and ``position`` are optional.
+        raw_bytes: Raw binary content of the PDF file.
 
     Returns:
-        A tuple of ``(query_id, enriched_results)`` where ``enriched_results``
-        is a copy of ``results`` with a ``result_id`` field added to each entry.
-        Returns the generated IDs even if the DB write fails.
+        A 3-tuple of:
+        - ``full_text`` (str): All pages concatenated with ``## Page N``
+          section headers. Empty string if extraction fails.
+        - ``page_count`` (int): Total number of pages in the PDF.
+        - ``images`` (list): One entry per extracted image:
+          ``(page_num, img_idx, ext, img_bytes, width, height)``
+          where ``ext`` is e.g. ``"png"`` and ``img_bytes`` is raw image data.
+
+    Raises:
+        Does not raise — all exceptions are caught and logged. Returns empty
+        text and empty image list on failure.
     """
-    query_id = str(uuid4())
-    enriched = [
-        {**r, "result_id": str(uuid4()), "position": r.get("position", i + 1)}
-        for i, r in enumerate(results)
-    ]
     try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
-            session.add(
-                SearchQuery(
-                    id=query_id,
-                    job_id=job_id,
-                    query_text=search_query_text,
-                    results_count=len(enriched),
-                    executed_at=datetime.now(timezone.utc),
-                )
-            )
-            for r in enriched:
-                session.add(
-                    SearchResult(
-                        id=r["result_id"],
-                        search_result_id=search_result_id,
-                        position=r["position"],
-                        url=r["url"],
-                        title=r.get("title"),
-                        snippet=r.get("snippet"),
+        import pymupdf  # type: ignore
+    except ImportError:
+        logger.warning("pymupdf not installed — PDF text extraction unavailable")
+        return "", 0, []
+
+    try:
+        doc = pymupdf.open(stream=raw_bytes, filetype="pdf")
+        pages_text: list[str] = []
+        images: list[tuple[int, int, str, bytes, int, int]] = []
+
+        for page_num, page in enumerate(doc, start=1):  # type: ignore[attr-defined]
+            # --- Extract page text -------------------------------------------
+            text = page.get_text()
+            if text.strip():
+                pages_text.append(f"## Page {page_num}\n\n{text.strip()}")
+
+            # --- Extract embedded images -------------------------------------
+            for img_idx, img_ref in enumerate(page.get_images(full=True)):
+                xref = img_ref[0]
+                try:
+                    base_image = doc.extract_image(xref)
+                    images.append((
+                        page_num,
+                        img_idx,
+                        base_image["ext"],
+                        base_image["image"],
+                        base_image.get("width", 0),
+                        base_image.get("height", 0),
+                    ))
+                except Exception as img_err:
+                    logger.debug(
+                        "Skipping image xref=%d page=%d: %s", xref, page_num, img_err
                     )
-                )
-            await session.commit()
+
+        page_count = len(doc)
+        doc.close()
+        return "\n\n".join(pages_text), page_count, images
     except Exception as e:
-        logger.warning("Failed to persist search_query: %s", e)
-    return query_id, enriched
+        logger.warning("PDF extraction failed: %s", e)
+        return "", 0, []
 
 
-async def get_search_result(result_id: str) -> dict | None:
-    """Return the stored URL and metadata for a search result row.
+async def check_duplicate(source_ref: str) -> dict[str, Any] | None:
+    """Check if a public URL has already been fetched by any job or enterprise.
 
-    Used by ``web_fetch`` to resolve a ``result_id`` to its URL without
-    the agent ever handling raw URLs directly.
-
-    Args:
-        result_id: UUID of the ``search_results`` row.
-
-    Returns:
-        Dict with ``url``, ``title``, ``snippet``, ``query_id``, or ``None``
-        if the row doesn't exist or the DB lookup fails.
-    """
-    try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
-            stmt = select(SearchResult).where(SearchResult.id == result_id)
-            result = await session.execute(stmt)
-            row = result.scalar_one_or_none()
-            if row is None:
-                return None
-            return {
-                "url": row.url,
-                "title": row.title,
-                "snippet": row.snippet,
-                "query_id": row.query_id,
-            }
-    except Exception as e:
-        logger.warning("Failed to fetch search result %s: %s", result_id, e)
-        return None
-
-
-async def check_duplicate(
-    source_ref: str,
-    job_id: str | None,
-) -> dict[str, Any] | None:
-    """Check if a URL has already been crawled within the same job.
-
-    Queries ``data_sources`` by ``(source_ref, job_id)``.
+    Web-fetched content is always stored as public (``enterprise_id=NULL``),
+    so deduplication is global — if any job has already fetched this URL the
+    stored copy can be reused without re-downloading.
 
     Args:
         source_ref: The URL to check.
-        job_id: The job to scope the check to. If ``None``, always
-            returns ``None`` (no dedup without a job context).
 
     Returns:
         A dict with ``source_id``, ``s3_bronze_path``, ``source_type``,
         ``preview``, and ``duplicate=True`` if a match is found.
         ``None`` if no duplicate exists or the check fails.
     """
-    if not job_id:
-        return None
     try:
         session_factory = get_session_factory()
         async with session_factory() as session:
             stmt = select(DataSource).where(
                 DataSource.source_ref == source_ref,
-                DataSource.job_id == job_id,
+                DataSource.enterprise_id.is_(None),
             )
             result = await session.execute(stmt)
             row = result.scalar_one_or_none()
             if row is None:
                 return None
+            # --- Load actual content preview from bronze storage ---------------
+            storage = get_storage()
+            preview = ""
+            content_path = f"{row.s3_bronze_path}content.md"
+            try:
+                if storage.exists(content_path):
+                    preview = storage.read_text(content_path)[:PREVIEW_LENGTH].strip()
+            except Exception as _e:
+                logger.debug("Could not read cached content for %s: %s", source_ref, _e)
             return {
                 "source_id": row.id,
                 "s3_bronze_path": row.s3_bronze_path,
                 "source_type": row.source_type,
-                "preview": "(already crawled)",
+                "preview": preview,
                 "duplicate": True,
             }
     except Exception as e:
@@ -161,20 +143,22 @@ async def check_duplicate(
 
 
 async def store_page(
-    enterprise_id: str,
     job_id: str | None,
     search_result_id: str | None,
     url: str,
     markdown_content: str,
 ) -> dict[str, Any]:
-    """Save a crawled web page to bronze storage and record it in the DB.
+    """Save a crawled web page to public bronze storage and record it in the DB.
+
+    Web-fetched content is always public (``enterprise_id=NULL``) and stored
+    under ``public/bronze/{source_id}/``. Any enterprise can reuse it once
+    ingested; access control is enforced at the silver/KG layer.
 
     Writes ``content.md`` and ``meta.json`` to the bronze directory, then
     creates a ``data_sources`` row linking the file to its provenance chain.
 
     Args:
-        enterprise_id: Tenant that owns this source (from JWT).
-        job_id: FK to the parent job (WHY this was fetched).
+        job_id: FK to the parent job (tracks which run triggered the fetch).
         search_result_id: FK to the ``search_results`` row that led to this fetch
             (``None`` if fetched outside of a search flow).
         url: The original page URL (stored as ``source_ref``).
@@ -187,8 +171,8 @@ async def store_page(
     now = datetime.now(timezone.utc)
     storage = get_storage()
 
-    # --- Write content + metadata sidecar to bronze --------------------------
-    bronze_dir = f"enterprise/{enterprise_id}/bronze/{source_id}"
+    # --- Write content + metadata sidecar to public bronze -------------------
+    bronze_dir = f"public/bronze/{source_id}"
     storage.write_text(f"{bronze_dir}/content.md", markdown_content)
 
     meta = {
@@ -199,7 +183,7 @@ async def store_page(
     }
     storage.write_text(f"{bronze_dir}/meta.json", json.dumps(meta, indent=2))
 
-    # --- Create data_sources row ---------------------------------------------
+    # --- Create data_sources row (enterprise_id=NULL → public) ---------------
     s3_bronze_path = f"{bronze_dir}/"
     try:
         session_factory = get_session_factory()
@@ -207,7 +191,7 @@ async def store_page(
             session.add(
                 DataSource(
                     id=source_id,
-                    enterprise_id=enterprise_id,
+                    enterprise_id=None,
                     job_id=job_id,
                     search_result_id=search_result_id,
                     source_type="web_page",
@@ -231,7 +215,6 @@ async def store_page(
 
 
 async def store_binary(
-    enterprise_id: str,
     job_id: str | None,
     search_result_id: str | None,
     url: str,
@@ -239,15 +222,21 @@ async def store_binary(
     content_type: str,
     http_status: int,
 ) -> dict[str, Any]:
-    """Save a downloaded binary file to bronze storage and record it in the DB.
+    """Save a downloaded binary file to public bronze storage and record it in the DB.
 
-    Writes the original file and ``meta.json`` to the bronze directory, then
-    creates a ``data_sources`` row. Binary conversion (PDF → text, etc.) is
-    handled separately by the Extraction Agent.
+    Web-fetched binaries are always public (``enterprise_id=NULL``) and stored
+    under ``public/bronze/{source_id}/``.
+
+    For PDFs, runs inline text and image extraction via pymupdf:
+    - Extracted text is stored as ``content.md`` alongside the original binary.
+    - Embedded images are stored under ``images/page_{n}_img_{i}.{ext}``.
+    - Page count and image metadata are recorded in ``meta.json``.
+
+    For other binary types (XLSX, CSV, DOCX), only the raw file is stored;
+    extraction is handled separately by the Extraction Agent.
 
     Args:
-        enterprise_id: Tenant that owns this source (from JWT).
-        job_id: FK to the parent job (WHY this was fetched).
+        job_id: FK to the parent job (tracks which run triggered the fetch).
         search_result_id: FK to the ``search_results`` row that led to this fetch.
         url: The original download URL (stored as ``source_ref``).
         raw_bytes: The raw binary content.
@@ -256,6 +245,8 @@ async def store_binary(
 
     Returns:
         dict with ``source_id``, ``s3_bronze_path``, ``source_type``, ``preview``.
+        For PDFs, ``preview`` contains the first ``PREVIEW_LENGTH`` characters of
+        extracted text. For other types, it is a human-readable size message.
     """
     source_id = str(uuid4())
     now = datetime.now(timezone.utc)
@@ -265,11 +256,42 @@ async def store_binary(
     ext = url.rsplit(".", 1)[-1].lower() if "." in url else "bin"
     source_type = f"web_{ext}"  # web_pdf, web_xlsx, etc.
 
-    # --- Write binary + metadata sidecar to bronze ---------------------------
-    bronze_dir = f"enterprise/{enterprise_id}/bronze/{source_id}"
+    # --- Write original binary to public bronze storage ----------------------
+    bronze_dir = f"public/bronze/{source_id}"
     storage.write(f"{bronze_dir}/original.{ext}", raw_bytes)
 
-    meta = {
+    # --- For PDFs: extract full text + images --------------------------------
+    page_count = 0
+    image_meta: list[dict] = []
+    if ext == "pdf":
+        full_text, page_count, raw_images = await asyncio.to_thread(
+            _extract_pdf_sync, raw_bytes
+        )
+        if full_text:
+            storage.write_text(f"{bronze_dir}/content.md", full_text)
+        for pg, idx, img_ext, img_bytes, w, h in raw_images:
+            img_path = f"{bronze_dir}/images/page_{pg}_img_{idx}.{img_ext}"
+            try:
+                storage.write(img_path, img_bytes)
+                image_meta.append(
+                    {"page": pg, "index": idx, "path": img_path, "ext": img_ext,
+                     "width": w, "height": h}
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to store image page=%d idx=%d for %s: %s", pg, idx, url, e
+                )
+        preview = (
+            full_text[:PREVIEW_LENGTH].strip()
+            if full_text
+            else f"(PDF downloaded, {len(raw_bytes)} bytes — text extraction failed)"
+        )
+    else:
+        full_text = ""
+        preview = f"({ext.upper()} downloaded, {len(raw_bytes)} bytes — pending extraction)"
+
+    # --- Write metadata sidecar ----------------------------------------------
+    meta: dict[str, Any] = {
         "source_ref": url,
         "source_type": source_type,
         "http_status": http_status,
@@ -277,9 +299,12 @@ async def store_binary(
         "content_length": len(raw_bytes),
         "crawled_at": now.isoformat(),
     }
+    if ext == "pdf":
+        meta["pages"] = page_count
+        meta["images"] = image_meta
     storage.write_text(f"{bronze_dir}/meta.json", json.dumps(meta, indent=2))
 
-    # --- Create data_sources row ---------------------------------------------
+    # --- Create data_sources row (enterprise_id=NULL → public) ---------------
     s3_bronze_path = f"{bronze_dir}/"
     try:
         session_factory = get_session_factory()
@@ -287,7 +312,7 @@ async def store_binary(
             session.add(
                 DataSource(
                     id=source_id,
-                    enterprise_id=enterprise_id,
+                    enterprise_id=None,
                     job_id=job_id,
                     search_result_id=search_result_id,
                     source_type=source_type,
@@ -301,7 +326,6 @@ async def store_binary(
     except Exception as e:
         logger.warning("Failed to persist data_source for %s: %s", url, e)
 
-    preview = f"({ext.upper()} downloaded, {len(raw_bytes)} bytes — pending extraction)"
     return {
         "source_id": source_id,
         "s3_bronze_path": s3_bronze_path,

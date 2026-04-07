@@ -1,7 +1,7 @@
 """Web search tool — thin wrapper around Serper search with provenance tracking.
 
 Posts to the Serper Google Search JSON API (``https://google.serper.dev/search``)
-via ``httpx`` and calls ``ingestion_service.record_search_query`` to persist
+via ``httpx`` and calls ``search_service.record_search_query`` to persist
 provenance. Reads ``SERPER_API_KEY`` from the environment.
 """
 
@@ -15,7 +15,7 @@ import httpx
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from backend.services import ingestion_service
+from backend.services import search_service
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ async def web_search(
     # --- Persist query + results, get back result_ids for the agent ----------
     search_query_id: str | None = None
     if job_id:
-        search_query_id, results = await ingestion_service.record_search_query(
+        search_query_id, results = await search_service.record_search_query(
             job_id=job_id,
             search_query_text=search_query_text,
             results=results,

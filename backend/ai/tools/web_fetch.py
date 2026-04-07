@@ -6,7 +6,8 @@ Routing:
   JS rendering and returns clean markdown.
 
 The tool itself only fetches — all storage writes and DB operations are
-handled by ``ingestion_service``.
+handled by ``ingestion_service``. URL resolution from ``result_id`` is
+handled by ``search_service``.
 """
 
 from __future__ import annotations
@@ -18,11 +19,47 @@ import httpx
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from backend.services import ingestion_service
+from backend.services import ingestion_service, search_service
 
 logger = logging.getLogger(__name__)
 
 _BINARY_EXTENSIONS = (".pdf", ".xlsx", ".xls", ".csv", ".docx", ".doc")
+
+# Maximum characters of extracted content returned to the agent in the
+# ToolMessage.content field. Full content is stored in S3 (artifact side).
+_AGENT_EXCERPT_LENGTH = 2000
+
+
+def _format_tool_content(url: str, result: dict[str, Any]) -> str:
+    """Format the text content returned to the agent in the tool message.
+
+    Produces a structured block the agent can use directly for citation and
+    synthesis: source metadata header followed by the fetched text excerpt.
+
+    Args:
+        url: The fetched URL.
+        result: Storage result dict from ingestion_service (contains
+            ``source_id``, ``source_type``, ``preview``, optionally
+            ``duplicate`` and ``error``).
+
+    Returns:
+        Formatted string with source header and content excerpt.
+    """
+    source_id = result.get("source_id", "unknown")
+    source_type = result.get("source_type", "unknown")
+    preview = result.get("preview", "")
+    header = (
+        f"SOURCE STORED\n"
+        f"source_id: {source_id}\n"
+        f"source_type: {source_type}\n"
+        f"url: {url}\n"
+    )
+    if result.get("error"):
+        return header + f"\nError: {result['error']}"
+    suffix = "(cached — reusing stored copy)\n\n" if result.get("duplicate") else ""
+    if preview:
+        return header + f"\nCONTENT EXCERPT:\n{suffix}{preview[:_AGENT_EXCERPT_LENGTH]}"
+    return header + f"\n{suffix}(no content available)"
 
 
 def _is_binary_url(url: str) -> bool:
@@ -92,12 +129,12 @@ async def _crawl_page(url: str) -> str | None:
         return None
 
 
-@tool
+@tool(response_format="content_and_artifact")
 async def web_fetch(
     result_id: str,
     *,
     config: RunnableConfig,
-) -> dict[str, Any]:
+) -> tuple[str, dict[str, Any]]:
     """Download and store the full content of a search result for later analysis.
 
     Use this after ``web_search`` to retrieve the complete content of a page or
@@ -106,44 +143,48 @@ async def web_fetch(
     Handles both web pages (HTML/JS rendered via Playwright) and binary files
     (PDF, XLSX, etc.).
 
+    Returns two parts via the ``content_and_artifact`` pattern:
+    - ``content`` (str): Source metadata header + text excerpt for the agent
+      to read and synthesize. PDFs include extracted text; web pages include
+      cleaned markdown. Stored in ``ToolMessage.content`` and fed to the LLM.
+    - ``artifact`` (dict): Full storage metadata (``source_id``,
+      ``s3_bronze_path``, ``source_type``, ``preview``). Stored in
+      ``ToolMessage.artifact`` and also fed to the LLM as part of the tool
+      message payload.
+
     Args:
         result_id: The ``result_id`` from a ``web_search`` result entry.
 
     Returns:
-        dict with keys:
-        - ``source_id`` (str | None): UUID of the stored source, or ``None`` on failure.
-        - ``s3_bronze_path`` (str): Storage path where content was saved.
-        - ``source_type`` (str): Detected type, e.g. ``"web_page"`` or ``"web_pdf"``.
-        - ``preview`` (str): First 500 characters of content.
-        - ``duplicate`` (bool): ``True`` if this URL was already fetched in this job.
-        - ``error`` (str): Present only on failure, describes what went wrong.
+        Tuple of ``(content, artifact)`` where ``content`` is the agent-readable
+        string and ``artifact`` is the raw storage result dict.
     """
     # --- Read per-request config from LangGraph configurable -----------------
-    enterprise_id: str = config.get("configurable", {}).get(
-        "enterprise_id", "dev-enterprise"
-    )
     job_id: str | None = config.get("configurable", {}).get("job_id")
 
     # --- Resolve URL from the stored search result ---------------------------
-    search_result = await ingestion_service.get_search_result(result_id)
+    search_result = await search_service.get_search_result(result_id)
     if search_result is None:
-        return {"source_id": None, "error": f"result_id {result_id!r} not found."}
+        error_msg = f"result_id {result_id!r} not found."
+        return error_msg, {"source_id": None, "error": error_msg}
     url = search_result["url"]
 
-    # --- Deduplication: skip if same URL already fetched ---------------------
-    dup = await ingestion_service.check_duplicate(url, job_id)
+    # --- Global deduplication: skip if any job has already fetched this URL --
+    dup = await ingestion_service.check_duplicate(url)
     if dup:
-        return dup
+        return _format_tool_content(url, dup), dup
 
     # --- PATH A: Binary content (PDF, Excel, etc.) ---------------------------
     if _is_binary_url(url):
-        result = await _download_binary(url)
-        if result is None:
-            return {"source_id": None, "error": "Failed to download binary", "url": url}
+        download = await _download_binary(url)
+        if download is None:
+            artifact: dict[str, Any] = {
+                "source_id": None, "error": "Failed to download binary", "url": url
+            }
+            return f"Error: failed to download binary from {url}", artifact
 
-        raw_bytes, content_type, http_status = result
-        return await ingestion_service.store_binary(
-            enterprise_id=enterprise_id,
+        raw_bytes, content_type, http_status = download
+        result = await ingestion_service.store_binary(
             job_id=job_id,
             search_result_id=result_id,
             url=url,
@@ -151,16 +192,18 @@ async def web_fetch(
             content_type=content_type,
             http_status=http_status,
         )
+        return _format_tool_content(url, result), result
 
     # --- PATH B: Web page — crawl via crawl4ai (Playwright) ------------------
     markdown = await _crawl_page(url)
     if markdown is None:
-        return {"source_id": None, "error": "Failed to crawl page", "url": url}
+        artifact = {"source_id": None, "error": "Failed to crawl page", "url": url}
+        return f"Error: failed to crawl {url}", artifact
 
-    return await ingestion_service.store_page(
-        enterprise_id=enterprise_id,
+    result = await ingestion_service.store_page(
         job_id=job_id,
         search_result_id=result_id,
         url=url,
         markdown_content=markdown,
     )
+    return _format_tool_content(url, result), result
