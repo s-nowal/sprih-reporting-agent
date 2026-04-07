@@ -1,12 +1,11 @@
 """DataSource model — tracks every fetched URL or uploaded file.
 
-No entity_id or s3_silver_path — those are extraction concerns.
-Backlinks from extraction records point here via source_id.
-
-When a URL is fetched for the first time ``origin_source_id`` is NULL — that
-row is the canonical source. On subsequent fetches of the same URL across
-different jobs, a new row is created with ``origin_source_id`` pointing to
-the canonical row so downstream agents can reuse existing extraction results.
+Public/private split (mirrors S3 layout):
+  - ``enterprise_id = NULL``: public web content fetched by the Research Agent.
+    S3 path is ``public/bronze/{source_id}/``. Accessible to all enterprises.
+  - ``enterprise_id = <eid>``: private enterprise content (uploads, ERP exports).
+    S3 path is ``enterprise/{eid}/bronze/uploads/{id}/`` or similar.
+    Accessible only to the owning enterprise.
 """
 
 from datetime import datetime
@@ -21,16 +20,13 @@ class DataSource(Base):
     __tablename__ = "data_sources"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    enterprise_id: Mapped[str] = mapped_column(String(36))
+    # NULL for public web sources; set for private enterprise content.
+    enterprise_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     job_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("jobs.id"), nullable=True
     )
     search_result_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("search_results.id"), nullable=True
-    )
-    # NULL on the canonical row; set on cross-job dedup rows.
-    origin_source_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("data_sources.id"), nullable=True
     )
     source_type: Mapped[str] = mapped_column(String(30))  # web_page, web_pdf, etc.
     source_ref: Mapped[str] = mapped_column(String(2048))  # URL or filename
@@ -41,5 +37,12 @@ class DataSource(Base):
 
     __table_args__ = (
         Index("ix_data_sources_enterprise_id", "enterprise_id"),
-        Index("ix_data_sources_enterprise_source_ref", "enterprise_id", "source_ref"),
+        # Global dedup index on source_ref alone — used by check_duplicate for
+        # public sources. source_ref is VARCHAR(2048); 200-char prefix keeps
+        # the key within MariaDB's 3072-byte limit.
+        Index(
+            "ix_data_sources_source_ref",
+            "source_ref",
+            mysql_length={"source_ref": 200},
+        ),
     )

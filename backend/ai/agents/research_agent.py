@@ -37,9 +37,10 @@ def build_research_graph(checkpointer: BaseCheckpointSaver | None = None):
         summarization, and prompt-caching middleware.
     """
     return create_deep_agent(
-        model="anthropic:claude-sonnet-4-20250514",
+        model="anthropic:claude-sonnet-4-6",
         tools=[web_search, web_fetch],
         system_prompt=RESEARCH_SYSTEM_PROMPT,
         checkpointer=checkpointer,
         name="research-agent",
+        subagents=[],  # disable the auto-added general-purpose subagent
     )

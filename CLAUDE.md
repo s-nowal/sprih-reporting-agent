@@ -7,7 +7,7 @@ FastAPI backend + Next.js frontend for AI-powered ESG (Environmental, Social, Go
 - **Runtime**: Python 3.12+, managed with `uv`
 - **Backend**: FastAPI + uvicorn
 - **Agent framework**: LangGraph (MIT) — swap boundary is `AgentService`
-- **LLM**: Anthropic Claude (`anthropic:claude-sonnet-4-20250514`)
+- **LLM**: Anthropic Claude (`anthropic:claude-sonnet-4-6-20251115`)
 - **Frontend**: Next.js (deep-agent-ui fork) at `frontend/`
 - **Databases**: MariaDB (metadata), Neo4j (knowledge graph), Qdrant (vector search)
 

@@ -123,7 +123,7 @@ def build_reporting_graph(workspace_root: Path):
     """
     return create_deep_agent(
         model=init_chat_model(
-            model="anthropic:claude-sonnet-4-20250514",
+            model="anthropic:claude-sonnet-4-6",
             max_retries=10,
             timeout=300,
         ),
