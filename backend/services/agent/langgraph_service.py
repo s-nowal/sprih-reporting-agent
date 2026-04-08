@@ -14,7 +14,6 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from backend.ai.agents.reporting_agent import build_reporting_graph
@@ -31,22 +30,29 @@ class LangGraphAgentService(AgentService):
     Stateless graphs (research-agent) are built once at startup and cached.
     Workspace-dependent graphs (reporting-agent) are built per-run because
     the ``FilesystemBackend`` root differs for each thread's temp workspace.
+
+    A single ``checkpointer`` is shared across all graphs so every thread
+    accumulates a full conversation history that persists across server restarts.
+
+    Args:
+        checkpointer: LangGraph checkpointer for persistent thread state.
+            Must support async operations (e.g. ``AsyncSqliteSaver``).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, checkpointer: Any) -> None:
+        self._checkpointer = checkpointer
         self._cached_graphs: dict[str, Any] = {}
         self._build_cached_graphs()
 
     def _build_cached_graphs(self) -> None:
         """Build and cache graphs that don't depend on per-run state.
 
-        The standalone research agent gets its own ``MemorySaver`` for
-        thread state.  When used as a subagent of the reporting agent,
-        the research graph is built without a checkpointer (see
-        ``reporting_agent.py``).
+        The standalone research agent uses the shared checkpointer for thread
+        state.  When used as a subagent of the reporting agent, the research
+        graph is built without a checkpointer (the parent manages state).
         """
         self._cached_graphs["research-agent"] = build_research_graph(
-            checkpointer=MemorySaver()
+            checkpointer=self._checkpointer
         )
 
     def _get_graph(
@@ -78,7 +84,7 @@ class LangGraphAgentService(AgentService):
                     f"Pass it via the workspace_root parameter."
                 )
             if graph_name == "reporting-agent":
-                return build_reporting_graph(workspace_root)
+                return build_reporting_graph(workspace_root, self._checkpointer)
             raise ValueError(f"No builder for workspace graph {graph_name!r}")
 
         # --- Cached graphs: built once at startup ----------------------------
@@ -226,7 +232,10 @@ class LangGraphAgentService(AgentService):
                 "thread_id": thread_id,
                 "enterprise_id": enterprise_id,
                 "job_id": job_id,
-            }
+            },
+            # LangSmith groups all runs with the same metadata.thread_id under
+            # one conversation thread in the UI.
+            "metadata": {"thread_id": thread_id},
         }
 
 
@@ -235,10 +244,15 @@ class LangGraphAgentService(AgentService):
 _service: LangGraphAgentService | None = None
 
 
-def init_agent_service() -> None:
-    """Create the singleton LangGraphAgentService. Called once at app startup."""
+def init_agent_service(checkpointer: Any) -> None:
+    """Create the singleton LangGraphAgentService. Called once at app startup.
+
+    Args:
+        checkpointer: Shared LangGraph checkpointer (e.g. ``AsyncSqliteSaver``)
+            that persists thread state across server restarts and between runs.
+    """
     global _service
-    _service = LangGraphAgentService()
+    _service = LangGraphAgentService(checkpointer)
 
 
 def get_agent_service() -> LangGraphAgentService:

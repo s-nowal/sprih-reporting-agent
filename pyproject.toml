@@ -20,6 +20,7 @@ dependencies = [
     "uvicorn[standard]>=0.42.0",
     "crawl4ai>=0.8.6",
     "pymupdf>=1.25",
+    "langgraph-checkpoint-sqlite>=3.0.3",
 ]
 
 [build-system]

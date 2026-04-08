@@ -14,7 +14,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: init DB tables, storage, registry, agent service. Shutdown: close DB."""
+    """Startup: init DB, storage, registry, checkpointer, agent service. Shutdown: close all."""
+    import aiosqlite
+    from pathlib import Path
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
     from backend.infra.db import close_db, get_session_factory, init_db
     from backend.infra.registry import init_registry
     from backend.infra.storage import LocalStorage
@@ -27,11 +31,22 @@ async def lifespan(app: FastAPI):
     init_registry(storage, get_session_factory())
     logger.info("Storage root: %s", settings.storage_root)
 
-    init_agent_service()
+    # --- Durable LangGraph checkpointer (SQLite) --------------------------------
+    # Persists conversation history (thread state) across server restarts so the
+    # LLM sees full message history on every turn within a thread.
+    checkpoints_path = Path(settings.storage_root) / "checkpoints.db"
+    checkpoints_path.parent.mkdir(parents=True, exist_ok=True)
+    db_conn = await aiosqlite.connect(str(checkpoints_path))
+    checkpointer = AsyncSqliteSaver(db_conn)
+    await checkpointer.setup()
+    logger.info("Checkpointer ready at %s", checkpoints_path)
+
+    init_agent_service(checkpointer)
     logger.info("Agent service ready.")
 
     yield
 
+    await db_conn.close()
     await close_db()
     logger.info("Database connection closed.")
 

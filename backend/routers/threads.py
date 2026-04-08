@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, Response
 
 from backend.handlers import thread_handler
+from backend.handlers.thread_handler import _ensure_thread
 from backend.schemas.threads import (
     ThreadCreate,
     ThreadResponse,
@@ -48,9 +49,13 @@ async def get_thread_state(
     thread_id: str,
     enterprise: EnterpriseContext = Depends(get_enterprise_context),
 ):
-    """Return current thread state. SDK calls this for state hydration."""
-    t = await thread_handler.get_thread(thread_id, enterprise)
-    return {"values": t.values, "next": [], "checkpoint": None}
+    """Return current thread state. SDK calls this for state hydration.
+
+    Auto-creates the thread if it doesn't exist so stale thread IDs from the
+    frontend (e.g. after a server restart) don't produce unrecoverable 404s.
+    """
+    t = await _ensure_thread(thread_id, enterprise)
+    return {"values": t.get("values", {}), "next": [], "checkpoint": None}
 
 
 @router.post("/threads/{thread_id}/history")
@@ -58,8 +63,8 @@ async def get_thread_history(
     thread_id: str,
     enterprise: EnterpriseContext = Depends(get_enterprise_context),
 ):
-    """Return checkpoint history. Stub returns empty list."""
-    await thread_handler.get_thread(thread_id, enterprise)  # verify ownership
+    """Return checkpoint history. Auto-creates thread if missing; returns empty list."""
+    await _ensure_thread(thread_id, enterprise)
     return []
 
 

@@ -13,10 +13,10 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from backend.handlers.thread_handler import _assert_ownership, _threads
+from backend.handlers.thread_handler import _assert_ownership, _ensure_thread
 from backend.schemas.runs import RunCreate, RunResponse
 from backend.security.auth import EnterpriseContext
-from backend.services import job_service, workspace_service
+from backend.services import job_service, thread_service, workspace_service
 from backend.services.agent import get_agent_service
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ async def create_run(
     thread_id: str, data: RunCreate, enterprise: EnterpriseContext
 ) -> RunResponse:
     """Create a run record (non-streaming). Kept for API compatibility."""
-    _assert_ownership(thread_id, enterprise)
+    await _assert_ownership(thread_id, enterprise)
     now = datetime.now(timezone.utc)
     run_id = str(uuid4())
 
@@ -127,7 +127,7 @@ async def stream_run(
         SSE event dicts: ``metadata`` → N × ``values`` → ``end``
         (or ``error`` → ``end`` on failure).
     """
-    t = _assert_ownership(thread_id, enterprise)
+    await _ensure_thread(thread_id, enterprise)
     now = datetime.now(timezone.utc)
 
     _runs[run_id] = {
@@ -190,12 +190,12 @@ async def stream_run(
                 "data": json.dumps({"messages": messages}),
             }
 
-        # --- Sync thread state -----------------------------------------------
+        # --- Sync thread state back to DB ------------------------------------
         if last_state:
-            t["values"]["messages"] = _serialize_messages(
-                last_state.get("messages", [])
+            await thread_service.update_values(
+                thread_id,
+                {"messages": _serialize_messages(last_state.get("messages", []))},
             )
-            t["updated_at"] = datetime.now(timezone.utc)
 
         _runs[run_id]["status"] = "success"
         _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
@@ -245,7 +245,7 @@ async def get_run(
     Raises:
         HTTPException 404: If run not found or belongs to a different thread.
     """
-    _assert_ownership(thread_id, enterprise)
+    await _assert_ownership(thread_id, enterprise)
     r = _runs.get(run_id)
     if not r or r["thread_id"] != thread_id:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -268,7 +268,7 @@ async def cancel_run(
     Raises:
         HTTPException 404: If run not found or belongs to a different thread.
     """
-    _assert_ownership(thread_id, enterprise)
+    await _assert_ownership(thread_id, enterprise)
     r = _runs.get(run_id)
     if not r or r["thread_id"] != thread_id:
         raise HTTPException(status_code=404, detail="Run not found")

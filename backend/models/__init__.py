@@ -5,5 +5,6 @@ from backend.models.data_source import DataSource
 from backend.models.job import Job
 from backend.models.search_query import SearchQuery
 from backend.models.search_result import SearchResult
+from backend.models.thread import Thread
 
-__all__ = ["Base", "DataSource", "Job", "SearchQuery", "SearchResult"]
+__all__ = ["Base", "DataSource", "Job", "SearchQuery", "SearchResult", "Thread"]

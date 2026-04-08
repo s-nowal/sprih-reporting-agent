@@ -13,18 +13,19 @@ research agent's definition lives in one place (``research_agent.py``).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from deepagents import CompiledSubAgent, create_deep_agent
 from deepagents.backends import FilesystemBackend
 from deepagents.backends.protocol import EditResult, WriteResult
 from langchain.chat_models import init_chat_model
-from langgraph.checkpoint.memory import MemorySaver
 
 from backend.ai.agents.research_agent import build_research_graph
 from backend.ai.prompts.agents.reporting import REPORTING_SYSTEM_PROMPT
 from backend.ai.tools.user_input import request_user_input
 
-_checkpointer = MemorySaver()
+if TYPE_CHECKING:
+    from langgraph.checkpoint.base import BaseCheckpointSaver
 
 
 # ---------------------------------------------------------------------------
@@ -101,22 +102,24 @@ _researcher_subagent: CompiledSubAgent = {
 # Graph builder
 # ---------------------------------------------------------------------------
 
-def build_reporting_graph(workspace_root: Path):
+def build_reporting_graph(
+    workspace_root: Path,
+    checkpointer: BaseCheckpointSaver | None = None,
+):
     """Build and return the compiled reporting agent graph.
 
     A fresh graph is built per-run because the ``workspace_root`` differs
     for each thread (isolated temp directory).  This is cheap — it just
-    wires nodes and edges; the LLM and checkpointer are shared singletons.
-
-    Uses ``create_deep_agent`` which gives the agent:
-    - File system tools (read, write, edit, ls, glob, grep) on the workspace
-    - The research agent as a ``CompiledSubAgent`` for web research delegation
-    - ``request_user_input`` for human-in-the-loop interrupts
+    wires nodes and edges; the checkpointer is a shared singleton passed in
+    by the caller so conversation history persists across runs.
 
     Args:
         workspace_root: Absolute path to the temp workspace directory for
             this run. Must contain input/, workspace/, output/, reference/
             subdirectories.
+        checkpointer: Shared checkpointer for thread-scoped state persistence.
+            Pass the same instance across all runs so the LLM sees the full
+            conversation history on each turn.
 
     Returns:
         A compiled LangGraph ``StateGraph`` ready for ``ainvoke`` / ``astream``.
@@ -133,6 +136,6 @@ def build_reporting_graph(workspace_root: Path):
             deny_prefixes=["input", "reference"],
         ),
         tools=[request_user_input],
-        checkpointer=_checkpointer,
+        checkpointer=checkpointer,
         system_prompt=REPORTING_SYSTEM_PROMPT,
     )
