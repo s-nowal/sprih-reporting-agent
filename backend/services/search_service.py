@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from backend.infra.registry import get_session_factory
+from backend.infra.registry import get_db
 from backend.models.search_query import SearchQuery
 from backend.models.search_result import SearchResult
 
@@ -50,8 +50,8 @@ async def record_search_query(
         for i, r in enumerate(results)
     ]
     try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
+        db = get_db()
+        async with db() as session:
             session.add(
                 SearchQuery(
                     id=query_id,
@@ -92,8 +92,8 @@ async def get_search_result(result_id: str) -> dict | None:
         if the row doesn't exist or the DB lookup fails.
     """
     try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
+        db = get_db()
+        async with db() as session:
             stmt = select(SearchResult).where(SearchResult.id == result_id)
             result = await session.execute(stmt)
             row = result.scalar_one_or_none()

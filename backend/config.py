@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # Storage (local filesystem simulating S3)
     storage_root: str = "./data/s3"
+    storage_backend: str = "local"  # "local" | "s3" — add branches in storage.get_storage()
 
 
 settings = Settings()

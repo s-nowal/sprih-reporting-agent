@@ -24,8 +24,15 @@ def get_engine() -> AsyncEngine:
     return _engine
 
 
-def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return the shared session factory, creating it lazily on first call."""
+def make_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Create and return an async session factory bound to the shared engine.
+
+    Called once by ``Registry.from_config``. Caches the factory on the
+    module-level ``_session_factory`` variable.
+
+    Returns:
+        async_sessionmaker[AsyncSession]: Configured with ``expire_on_commit=False``.
+    """
     global _session_factory
     if _session_factory is None:
         _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)

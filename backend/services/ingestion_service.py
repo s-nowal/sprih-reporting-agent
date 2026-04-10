@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from backend.infra.registry import get_session_factory, get_storage
+from backend.infra.registry import get_db, get_storage
 from backend.models.data_source import DataSource
 
 logger = logging.getLogger(__name__)
@@ -111,8 +111,8 @@ async def check_duplicate(source_ref: str) -> dict[str, Any] | None:
         ``None`` if no duplicate exists or the check fails.
     """
     try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
+        db = get_db()
+        async with db() as session:
             stmt = select(DataSource).where(
                 DataSource.source_ref == source_ref,
                 DataSource.enterprise_id.is_(None),
@@ -186,8 +186,8 @@ async def store_page(
     # --- Create data_sources row (enterprise_id=NULL → public) ---------------
     s3_bronze_path = f"{bronze_dir}/"
     try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
+        db = get_db()
+        async with db() as session:
             session.add(
                 DataSource(
                     id=source_id,
@@ -307,8 +307,8 @@ async def store_binary(
     # --- Create data_sources row (enterprise_id=NULL → public) ---------------
     s3_bronze_path = f"{bronze_dir}/"
     try:
-        session_factory = get_session_factory()
-        async with session_factory() as session:
+        db = get_db()
+        async with db() as session:
             session.add(
                 DataSource(
                     id=source_id,

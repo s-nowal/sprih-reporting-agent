@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from backend.infra.registry import get_session_factory
+from backend.infra.registry import get_db
 from backend.models.thread import Thread
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ async def create(thread_id: str, enterprise_id: str, metadata: dict[str, Any]) -
     Raises:
         SQLAlchemy errors propagate — caller should handle conflicts.
     """
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         row = Thread(
             thread_id=thread_id,
             enterprise_id=enterprise_id,
@@ -57,8 +57,8 @@ async def get(thread_id: str) -> dict | None:
     Returns:
         Dict representation of the row, or ``None`` if not found.
     """
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         row = await session.get(Thread, thread_id)
         return _to_dict(row) if row else None
 
@@ -83,8 +83,8 @@ async def search(
     Returns:
         List of thread dicts ordered by ``updated_at`` descending.
     """
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         stmt = (
             select(Thread)
             .where(Thread.enterprise_id == enterprise_id)
@@ -116,8 +116,8 @@ async def update(thread_id: str, metadata: dict[str, Any]) -> dict | None:
     Returns:
         Updated dict representation of the row, or ``None`` if not found.
     """
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         row = await session.get(Thread, thread_id)
         if row is None:
             return None
@@ -139,8 +139,8 @@ async def update_values(thread_id: str, values: dict[str, Any]) -> None:
     Returns:
         None. Silently does nothing if the thread_id doesn't exist.
     """
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         row = await session.get(Thread, thread_id)
         if row is None:
             return
@@ -157,8 +157,8 @@ async def delete(thread_id: str) -> bool:
     Returns:
         ``True`` if the row existed and was deleted, ``False`` otherwise.
     """
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         row = await session.get(Thread, thread_id)
         if row is None:
             return False

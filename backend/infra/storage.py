@@ -1,6 +1,10 @@
-"""Local filesystem storage adapter (simulates S3 for dev/sandbox)."""
+"""Local filesystem storage adapter (simulates S3 for dev/sandbox).
 
-import os
+To add a new backend:
+1. Create ``infra/<backend>_storage.py`` with the adapter class.
+2. Add a branch in ``get_storage()`` and set ``SPRIH_STORAGE_BACKEND=<backend>`` in .env.
+"""
+
 from pathlib import Path
 
 
@@ -40,3 +44,24 @@ class LocalStorage:
     def abs_path(self, rel_path: str) -> str:
         """Return the absolute filesystem path for a storage-relative path."""
         return str(self._abs(rel_path))
+
+
+def get_storage(settings) -> LocalStorage:
+    """Return the storage adapter selected by ``settings.storage_backend``.
+
+    This is the swap point for adding backends. To add S3:
+    1. Create ``infra/s3_storage.py`` with an ``S3Storage`` class.
+    2. Add an ``"s3"`` branch here and set ``SPRIH_STORAGE_BACKEND=s3`` in .env.
+
+    Args:
+        settings: Application settings (``backend.config.Settings``).
+
+    Returns:
+        An initialised storage adapter.
+
+    Raises:
+        ValueError: If ``settings.storage_backend`` is not a known value.
+    """
+    if settings.storage_backend == "local":
+        return LocalStorage(settings.storage_root)
+    raise ValueError(f"Unknown storage_backend: {settings.storage_backend!r}")

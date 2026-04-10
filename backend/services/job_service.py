@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from backend.infra.registry import get_session_factory
+from backend.infra.registry import get_db
 from backend.models.job import Job
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ async def create_job(
         SQLAlchemy errors propagate — caller should handle them.
     """
     job_id = str(uuid4())
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         session.add(
             Job(
                 id=job_id,
@@ -65,8 +65,8 @@ async def update_status(job_id: str, status: str) -> None:
     Returns:
         None. Silently does nothing if the job_id doesn't exist.
     """
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    db = get_db()
+    async with db() as session:
         stmt = select(Job).where(Job.id == job_id)
         result = await session.execute(stmt)
         job = result.scalar_one_or_none()

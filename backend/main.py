@@ -19,17 +19,12 @@ async def lifespan(app: FastAPI):
     from pathlib import Path
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from backend.infra.db import close_db, get_session_factory, init_db
-    from backend.infra.registry import init_registry
-    from backend.infra.storage import LocalStorage
+    from backend.infra.registry import Registry, set_registry, teardown_registry
     from backend.services.agent import init_agent_service
 
-    logger.info("Initialising database…")
-    await init_db()
-
-    storage = LocalStorage(settings.storage_root)
-    init_registry(storage, get_session_factory())
-    logger.info("Storage root: %s", settings.storage_root)
+    logger.info("Initialising infrastructure…")
+    registry = await Registry.from_config(settings)
+    set_registry(registry)
 
     # --- Durable LangGraph checkpointer (SQLite) --------------------------------
     # Persists conversation history (thread state) across server restarts so the
@@ -47,8 +42,8 @@ async def lifespan(app: FastAPI):
     yield
 
     await db_conn.close()
-    await close_db()
-    logger.info("Database connection closed.")
+    await teardown_registry()
+    logger.info("Infrastructure torn down.")
 
 
 app = FastAPI(
