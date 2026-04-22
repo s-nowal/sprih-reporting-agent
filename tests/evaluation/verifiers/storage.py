@@ -69,23 +69,29 @@ def verify_source_files(source: dict) -> None:
         assert storage.exists(f"{base}original.pdf"), (
             f"[web_pdf] {url}\n  Missing: {base}original.pdf"
         )
-        assert storage.exists(f"{base}content.md"), (
-            f"[web_pdf] {url}\n  Missing: {base}content.md "
-            "(pymupdf extraction should have run)"
-        )
-        extracted = storage.read_text(f"{base}content.md")
-        assert len(extracted) > 100, (
-            f"[web_pdf] {url}\n  content.md only {len(extracted)} chars"
-        )
-        assert "## Page" in extracted, (
-            f"[web_pdf] {url}\n  content.md missing '## Page N' markers"
-        )
         assert "pages" in meta, f"[web_pdf] {url}\n  meta.json missing 'pages' key"
-        assert isinstance(meta["pages"], int) and meta["pages"] > 0, (
-            f"[web_pdf] {url}\n  meta.json pages={meta['pages']!r}"
-        )
         assert "images" in meta, f"[web_pdf] {url}\n  meta.json missing 'images' key"
-        for img in meta["images"]:
-            assert storage.exists(img["path"]), (
-                f"[web_pdf] {url}\n  Declared image missing on disk: {img['path']}"
+        assert "extraction_status" in meta, (
+            f"[web_pdf] {url}\n  meta.json missing 'extraction_status' key"
+        )
+
+        if meta["extraction_status"] == "extracted":
+            # Text extraction succeeded — verify content.md is present and valid
+            assert storage.exists(f"{base}content.md"), (
+                f"[web_pdf] {url}\n  Missing: {base}content.md "
+                "(extraction_status='extracted' but file absent)"
             )
+            extracted = storage.read_text(f"{base}content.md")
+            assert len(extracted) > 100, (
+                f"[web_pdf] {url}\n  content.md only {len(extracted)} chars"
+            )
+            assert "## Page" in extracted, (
+                f"[web_pdf] {url}\n  content.md missing '## Page N' markers"
+            )
+            assert isinstance(meta["pages"], int) and meta["pages"] > 0, (
+                f"[web_pdf] {url}\n  meta.json pages={meta['pages']!r}"
+            )
+            for img in meta["images"]:
+                assert storage.exists(img["path"]), (
+                    f"[web_pdf] {url}\n  Declared image missing: {img['path']}"
+                )

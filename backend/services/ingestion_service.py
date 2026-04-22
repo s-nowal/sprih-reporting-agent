@@ -269,6 +269,15 @@ async def store_binary(
         )
         if full_text:
             storage.write_text(f"{bronze_dir}/content.md", full_text)
+            extraction_status = "extracted"
+        elif page_count > 0:
+            # PDF opened and pages found, but no extractable text —
+            # likely an image-based or scanned document.
+            extraction_status = "image_only"
+        else:
+            # pymupdf could not process the PDF at all (corrupt,
+            # password-protected, or pymupdf not installed).
+            extraction_status = "failed"
         for pg, idx, img_ext, img_bytes, w, h in raw_images:
             img_path = f"{bronze_dir}/images/page_{pg}_img_{idx}.{img_ext}"
             try:
@@ -302,6 +311,7 @@ async def store_binary(
     if ext == "pdf":
         meta["pages"] = page_count
         meta["images"] = image_meta
+        meta["extraction_status"] = extraction_status
     storage.write_text(f"{bronze_dir}/meta.json", json.dumps(meta, indent=2))
 
     # --- Create data_sources row (enterprise_id=NULL → public) ---------------

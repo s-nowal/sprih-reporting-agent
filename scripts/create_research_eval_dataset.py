@@ -50,6 +50,23 @@ REFERENCE_URLS = [
     "https://samarthdiamonds.com/ethical-sourcing-of-natural-diamonds/",
 ]
 
+REFERENCE_ANSWER = (
+    "Samarth Diamond (est. 1987, Mumbai) manufactures small-size round brilliant-cut "
+    "diamonds (1.00-3.00mm). An RJC member since April 2019, it holds COP certification "
+    "#0000 6513 (October 2025 - October 2028) and is a De Beers Sightholder that has "
+    "passed the De Beers BPP compliance audit. The company aligns with the Watch and "
+    "Jewellery Initiative 2030 (WJI2030). Samarth sources 70-75% of rough diamonds from "
+    "De Beers, with the balance from South Africa, Canada, and Namibia. Its proprietary "
+    "'Mines to Market' traceability software tracks each stone to its Kimberley Process "
+    "number and origin. A 1.5 MW solar plant and windmill supply 85% of electricity at "
+    "the Gujarat facility. The campus has 22,000 planted trees and recharges ~25 million "
+    "liters of rainwater annually. The company targets carbon neutrality by 2030. CSR "
+    "includes adoption of Navdeep Vidhya Mandir school (~450 students) in North Gujarat "
+    "and Rs. 1,00,000 employee medical coverage. Samarth has published sustainability "
+    "reports — the latest (2025) themed 'Crafting Brilliance, Spreading Happiness' — "
+    "structured around four pillars: Planet, Product, People, and Process."
+)
+
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +103,10 @@ def main() -> None:
         examples=[
             {
                 "inputs": {"task": RESEARCH_INPUT},
-                "outputs": {"reference_urls": REFERENCE_URLS},
+                "outputs": {
+                    "reference_urls": REFERENCE_URLS,
+                    "reference_answer": REFERENCE_ANSWER,
+                },
             }
         ],
     )

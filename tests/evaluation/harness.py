@@ -5,7 +5,7 @@ never import langsmith directly. Swapping to LangFuse means changing only
 this file — all evaluators, configs, and test functions stay the same.
 
 Usage:
-    from tests.evaluation.harness import EvalConfig, EvalResult, make_score_evaluator, run_eval
+    from tests.evaluation.harness import EvalConfig, EvalResult, make_score_evaluator, run_eval, get_failed_examples, retry_failed_runs
 
     def _my_judge(run_output: dict, reference_output: dict) -> tuple[float, str]:
         ...
@@ -27,11 +27,10 @@ Usage:
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from langsmith import aevaluate
+from langsmith import Client, aevaluate
 from langsmith.evaluation import EvaluationResult
 
 
@@ -113,7 +112,6 @@ def make_score_evaluator(
         return EvaluationResult(
             key=score_key,
             score=int(score),
-            value={"fetched_count": len(outputs.get("fetched_urls", []))},
             comment=comment,
         )
 
@@ -149,7 +147,6 @@ async def run_eval(
         data=config.dataset_name,
         evaluators=config.evaluators,
         experiment_prefix=config.experiment_prefix,
-        project_name=os.environ.get("LANGSMITH_PROJECT"),
     )
 
     # --- Collect scores from all examples and evaluators ---------------------
@@ -169,4 +166,104 @@ async def run_eval(
         avg_score=avg,
         scores=scores,
         experiment_name=results.experiment_name,
+    )
+
+
+def get_failed_examples(
+    experiment_name: str,
+    config: EvalConfig,
+) -> list:
+    """Return dataset examples that have no successful run in the given experiment.
+
+    Compares all runs in the experiment against the full dataset to find
+    examples that either errored or never ran. The returned list can be
+    inspected and filtered before passing to retry_failed_runs().
+
+    Args:
+        experiment_name: Exact LangSmith experiment name to inspect
+            (e.g. "research-agent-10-979a8b26"). Returned by run_eval()
+            as EvalResult.experiment_name.
+        config: EvalConfig whose dataset_name is used to fetch all examples.
+
+    Returns:
+        List of langsmith.schemas.Example objects with no successful run.
+        Empty list if all examples completed successfully.
+    """
+    client = Client()
+
+    successful_example_ids = {
+        r.reference_example_id
+        for r in client.list_runs(project_name=experiment_name)
+        if r.error is None and r.reference_example_id is not None
+    }
+
+    all_examples = list(client.list_examples(dataset_name=config.dataset_name))
+    failed = [e for e in all_examples if e.id not in successful_example_ids]
+
+    if failed:
+        print(
+            f"Found {len(failed)} failed example(s) in '{experiment_name}':\n"
+            + "\n".join(
+                f"  [{i}] {e.inputs.get('task', str(e.inputs))[:80]}"
+                for i, e in enumerate(failed)
+            )
+        )
+    else:
+        print(f"No failed examples in '{experiment_name}' — all runs succeeded.")
+
+    return failed
+
+
+async def retry_failed_runs(
+    failed_examples: list,
+    experiment_name: str,
+    config: EvalConfig,
+    target_fn: Callable[[dict], Awaitable[dict]],
+) -> EvalResult:
+    """Rerun a specific list of examples, appending results to an existing experiment.
+
+    Intended to be called after get_failed_examples() — the caller can inspect
+    and filter the list before passing it here, allowing selective reruns.
+
+    Args:
+        failed_examples: List of langsmith.schemas.Example objects to rerun.
+            Typically the output of get_failed_examples(), optionally filtered.
+        experiment_name: Exact LangSmith experiment name to append results to.
+            Must match the original experiment so scores appear in the same run.
+        config: EvalConfig describing the threshold and evaluators.
+        target_fn: Same target function used in the original run_eval() call.
+
+    Returns:
+        EvalResult scoped to the retried examples only. avg_score and scores
+        reflect only the newly run examples, not the full experiment.
+
+    Raises:
+        ValueError: If failed_examples is empty.
+        AssertionError: If any retried target_fn run raises an error.
+    """
+    if not failed_examples:
+        raise ValueError("failed_examples is empty — nothing to retry.")
+
+    results = await aevaluate(
+        target_fn,
+        data=failed_examples,
+        evaluators=config.evaluators,
+        experiment=experiment_name,
+    )
+
+    scores: list[float] = []
+    async for row in results:
+        run = row["run"]
+        assert run.error is None, f"Agent run raised an error:\n{run.error}"
+        eval_results: list[EvaluationResult] = row["evaluation_results"]["results"]
+        for er in eval_results:
+            if er.score is not None:
+                scores.append(float(er.score))
+
+    avg = sum(scores) / len(scores) if scores else 0.0
+    return EvalResult(
+        passed=avg >= config.pass_threshold,
+        avg_score=avg,
+        scores=scores,
+        experiment_name=experiment_name,
     )

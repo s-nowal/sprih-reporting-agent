@@ -1,8 +1,8 @@
-"""Evaluation test: Research Agent — source coverage.
+"""Evaluation test: Research Agent — source coverage and answer quality.
 
-Runs the Research Agent against the LangSmith dataset ``research-agent-eval``,
-verifies the full DB provenance chain and S3 storage layout, then scores
-source coverage with an LLM judge.
+Runs the Research Agent against LangSmith datasets, verifies the full DB
+provenance chain and S3 storage layout, then scores source coverage and
+answer quality with LLM judges.
 
 Usage:
     uv run pytest tests/evaluation/agents/research_agent/ -v -s
@@ -10,7 +10,9 @@ Usage:
 Requires:
     Docker containers running: docker compose up -d
     ANTHROPIC_API_KEY, SERPER_API_KEY, and LANGCHAIN_API_KEY in .env
-    LangSmith dataset created: uv run python scripts/create_research_eval_dataset.py
+    LangSmith datasets created:
+        uv run python scripts/create_research_eval_dataset.py
+        uv run python scripts/create_research_eval_dataset_10.py
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import uuid
 import anthropic
 
 from backend.ai.agents.research_agent import build_research_graph
-from backend.infra.registry import get_session_factory
+from backend.infra.registry import get_db
 from backend.models.job import Job
 
 from tests.evaluation.harness import EvalConfig, make_score_evaluator, run_eval
@@ -93,7 +95,69 @@ Respond with JSON only: {{"score": <int 0-10>, "reasoning": "<one sentence>"}}""
 _coverage_evaluator = make_score_evaluator(
     _coverage_judge,
     score_key="source_coverage",
-    name="research_agent_evaluator",
+    name="research_agent_coverage_evaluator",
+)
+
+
+def _answer_judge(run_output: dict, reference_output: dict) -> tuple[float, str]:
+    """Score answer quality using Claude Sonnet 4.6.
+
+    Compares the agent's research output against a reference answer for
+    overall topical alignment. This is a loose check — the agent does not
+    need to reproduce the reference verbatim, just cover the same major
+    themes and key facts.
+
+    Args:
+        run_output: Target function outputs — must contain "agent_output" (str).
+        reference_output: Dataset example outputs — must contain "reference_answer" (str).
+
+    Returns:
+        Tuple of (score 0–10, one-sentence reasoning).
+    """
+    agent_output = run_output.get("agent_output", "")
+    reference_answer = reference_output.get("reference_answer", "")
+
+    if not reference_answer:
+        return 5.0, "No reference answer provided — default score."
+
+    agent_block = agent_output[:4000] if agent_output else "(no output)"
+
+    prompt = f"""\
+You are evaluating an ESG research agent's answer quality.
+
+REFERENCE ANSWER (gold standard — the key themes and facts a good answer should cover):
+{reference_answer}
+
+AGENT OUTPUT:
+{agent_block}
+
+Score the agent's answer from 0 to 10 based on overall topical coverage:
+  10 — Covers all major themes from the reference and adds useful detail
+  7–9 — Covers most major themes, minor omissions
+  4–6 — Covers some themes but misses important ones
+  1–3 — Mostly off-topic or superficial
+  0  — No relevant content
+
+This is a loose thematic check. The agent does NOT need to match the reference
+word-for-word. Different phrasing, additional context, or newer data are fine
+as long as the same key topics are addressed.
+
+Respond with JSON only: {{"score": <int 0-10>, "reasoning": "<one sentence>"}}"""
+
+    client = anthropic.Anthropic()
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=256,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    result = json.loads(message.content[0].text)
+    return float(result["score"]), result["reasoning"]
+
+
+_answer_evaluator = make_score_evaluator(
+    _answer_judge,
+    score_key="answer_quality",
+    name="research_agent_answer_evaluator",
 )
 
 # ---------------------------------------------------------------------------
@@ -104,7 +168,14 @@ EVAL_CONFIG = EvalConfig(
     dataset_name="research-agent-eval",
     experiment_prefix="research-agent",
     pass_threshold=6,
-    evaluators=[_coverage_evaluator],
+    evaluators=[_coverage_evaluator, _answer_evaluator],
+)
+
+EVAL_CONFIG_10 = EvalConfig(
+    dataset_name="research-agent-eval-10",
+    experiment_prefix="research-agent-10",
+    pass_threshold=5,
+    evaluators=[_coverage_evaluator, _answer_evaluator],
 )
 
 
@@ -124,8 +195,9 @@ async def _run_research_agent(inputs: dict) -> dict:
         inputs: Dataset example inputs — must contain "task" (str).
 
     Returns:
-        Dict with "fetched_urls" (list[str]) and "sources" (list of dicts
-        with id, source_ref, source_type, s3_bronze_path).
+        Dict with "fetched_urls" (list[str]), "sources" (list of dicts
+        with id, source_ref, source_type, s3_bronze_path), and
+        "agent_output" (str) — the agent's final research message.
 
     Raises:
         AssertionError: If any DB or storage integrity check fails.
@@ -135,7 +207,8 @@ async def _run_research_agent(inputs: dict) -> dict:
     thread_id = str(uuid.uuid4())
 
     # --- Create job row so search_queries / data_sources FKs resolve ---------
-    async with get_session_factory()() as session:
+    db = get_db()
+    async with db() as session:
         session.add(Job(
             id=job_id,
             enterprise_id=ENTERPRISE_ID,
@@ -147,7 +220,7 @@ async def _run_research_agent(inputs: dict) -> dict:
 
     # --- Run the research agent ----------------------------------------------
     graph = build_research_graph()
-    await graph.ainvoke(
+    result = await graph.ainvoke(
         {"messages": [{"role": "user", "content": task}]},
         config={
             "configurable": {
@@ -158,6 +231,15 @@ async def _run_research_agent(inputs: dict) -> dict:
         },
     )
 
+    # --- Extract the agent's final research output ----------------------------
+    messages = result.get("messages", [])
+    agent_output = ""
+    for msg in reversed(messages):
+        content = getattr(msg, "content", "")
+        if content and getattr(msg, "type", "") == "ai":
+            agent_output = content
+            break
+
     # --- Verify DB provenance chain and storage layout -----------------------
     provenance = await verify_provenance_chain(job_id)
     for src in provenance.sources:
@@ -166,6 +248,7 @@ async def _run_research_agent(inputs: dict) -> dict:
     return {
         "fetched_urls": [s["source_ref"] for s in provenance.sources],
         "sources": provenance.sources,
+        "agent_output": agent_output,
     }
 
 
@@ -183,5 +266,25 @@ async def test_research_agent_eval():
     result = await run_eval(_run_research_agent, EVAL_CONFIG)
     assert result.passed, (
         f"Coverage avg={result.avg_score:.1f} < threshold={EVAL_CONFIG.pass_threshold} "
+        f"(experiment: {result.experiment_name})"
+    )
+
+
+async def test_research_agent_eval_10():
+    """Broad evaluation: 10 diverse ESG research tasks across industries.
+
+    Runs the same agent and verifiers as test_research_agent_eval but against
+    a 10-example dataset covering different companies, industries, and query
+    types (general ESG, framework compliance, climate, peer comparison, supply
+    chain, controversy, governance, sector environmental, investment ESG, and
+    social impact). Uses a lower pass threshold to account for variance across
+    diverse tasks.
+
+    Requires:
+        LangSmith dataset created: uv run python scripts/create_research_eval_dataset_10.py
+    """
+    result = await run_eval(_run_research_agent, EVAL_CONFIG_10)
+    assert result.passed, (
+        f"Coverage avg={result.avg_score:.1f} < threshold={EVAL_CONFIG_10.pass_threshold} "
         f"(experiment: {result.experiment_name})"
     )

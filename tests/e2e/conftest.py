@@ -18,8 +18,8 @@ def client():
     """Session-scoped HTTP client backed by the real app.
 
     Uses Starlette's TestClient which triggers the ASGI lifespan:
-    ``init_db``, ``init_registry``, ``init_agent_service`` on entry,
-    ``close_db`` on teardown.
+    ``Registry.from_config``, ``set_registry``, ``init_agent_service`` on entry,
+    ``teardown_registry`` on teardown.
     """
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c

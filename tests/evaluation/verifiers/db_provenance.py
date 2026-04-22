@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from backend.infra.registry import get_session_factory
+from backend.infra.registry import get_db
 from backend.models.data_source import DataSource
 from backend.models.search_query import SearchQuery
 from backend.models.search_result import SearchResult
@@ -61,9 +61,9 @@ async def verify_provenance_chain(job_id: str) -> ProvenanceResult:
         AssertionError: On any chain violation, with a message describing
             the specific failure and the job_id.
     """
-    session_factory = get_session_factory()
+    db = get_db()
 
-    async with session_factory() as session:
+    async with db() as session:
 
         # --- search_queries --------------------------------------------------
         sq_rows = (

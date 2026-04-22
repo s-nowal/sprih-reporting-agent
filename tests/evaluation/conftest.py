@@ -29,15 +29,13 @@ async def init_infra():
         Exception: If the DB connection fails — verify ``docker compose up -d``.
     """
     from backend.config import settings
-    from backend.infra.db import close_db, get_session_factory, init_db
-    from backend.infra.registry import init_registry
-    from backend.infra.storage import LocalStorage
+    from backend.infra.registry import Registry, set_registry, teardown_registry
 
-    # Reset any engine created in a previous loop before reinitialising.
-    await close_db()
-    await init_db()
-    init_registry(LocalStorage(settings.storage_root), get_session_factory())
+    # Reset any engine/registry from a previous loop before reinitialising.
+    await teardown_registry()
+    registry = await Registry.from_config(settings)
+    set_registry(registry)
 
     yield
 
-    await close_db()
+    await teardown_registry()
