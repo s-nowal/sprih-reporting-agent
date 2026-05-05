@@ -9,15 +9,15 @@ services:
     volumes:
       - mariadb_data:/var/lib/mysql
 
-  neo4j:
-    image: neo4j:5
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      NEO4J_AUTH: neo4j/devpassword
-    volumes:
-      - neo4j_data:/data
+  # neo4j:
+  #   image: neo4j:5
+  #   ports:
+  #     - "7474:7474"
+  #     - "7687:7687"
+  #   environment:
+  #     NEO4J_AUTH: neo4j/devpassword
+  #   volumes:
+  #     - neo4j_data:/data
 
   qdrant:
     image: qdrant/qdrant:latest
