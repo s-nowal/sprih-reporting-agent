@@ -1,0 +1,49 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Environment-dependent path to Maven home directory
+/mavenHomeManager.xml
+
+# Github stats log directory
+**/resources/gh-stats/**
+
+# Idea project files
+.idea
+.idea/**
+**/target/**
+*.iml
+*.ipr
+*.iws
+**/*.iml
+**/dependency-reduced-pom.xml
+logs/**
+logs/
+tmp/**
+tmp/
+server/logs/**
+server/logs
+.DS_Store
+**/.DS_Store
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.env
+*.pem
+uv.lock
+
+# Data
+data/
+*.png
+
+# Research artifacts
+deep_agent_research*
+
+# Build artifacts
+*.egg-info/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env

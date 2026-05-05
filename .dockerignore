@@ -1,0 +1,29 @@
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.venv/
+**/*.egg-info/
+**/dist/
+**/.pytest_cache/
+
+# Node
+**/node_modules/
+
+# Next.js frontend (ignored per project requirements)
+sandbox-reporting_module/frontend/
+
+# Build artifacts
+wordgpt-main/dist/
+
+# Dev/editor
+**/.env.local
+**/.env.*.local
+**/.DS_Store
+**/*.log
+**/.git/
+**/.claude/
+
+# Large data / storage
+sandbox-reporting_module/data/
