@@ -15,6 +15,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 UPLOAD_DIR = BASE_DIR / "agent_folder"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+(UPLOAD_DIR / "input").mkdir(exist_ok=True)
+(UPLOAD_DIR / "output").mkdir(exist_ok=True)
+(UPLOAD_DIR / "workspace").mkdir(exist_ok=True)
 
 _documents: dict[str, dict] = {}
 _document_content: dict[str, str] = {}
@@ -81,7 +84,9 @@ async def upload_document_from_addin(payload: WordAddinPayload, enterprise: Ente
     """
     filename = payload.filename
     fileDirectory = payload.filepath
-    file_path = os.path.join(UPLOAD_DIR, fileDirectory, filename)
+    dest_dir = UPLOAD_DIR / fileDirectory
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    file_path = os.path.join(dest_dir, filename)
 
     if payload.document_base64:
         try:
@@ -135,6 +140,8 @@ async def get_document_from_addin(enterprise: EnterpriseContext):
 
     for file_directory in dir_list:
         filepath = Path(UPLOAD_DIR) / file_directory
+        if not filepath.exists():
+            continue
         for file_path in filepath.iterdir():
             if not file_path.is_file():
                 continue

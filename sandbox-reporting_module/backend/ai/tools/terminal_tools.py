@@ -10,7 +10,7 @@ HOST_PORT = 8001
 API_KEY = "your-secret-key"
 CONTAINER_NAME = "open-terminal"
 IMAGE = "ghcr.io/open-webui/open-terminal"
-BASE_URL = "http://localhost:8001"
+BASE_URL = "http://localhost:8080"
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 base_dir = Path(__file__).resolve().parent.parent.parent.parent
