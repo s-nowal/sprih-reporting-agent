@@ -24,6 +24,11 @@ async def lifespan(app: FastAPI):
     from backend.infra.storage import LocalStorage
     from backend.services.agent import init_agent_service
 
+    agent_folder = Path(__file__).resolve().parent.parent / "agent_folder"
+    for subdir in ("input", "output", "workspace", "reference"):
+        (agent_folder / subdir).mkdir(parents=True, exist_ok=True)
+    logger.info("Agent folder ready at %s", agent_folder)
+
     logger.info("Initialising database…")
     await init_db()
 

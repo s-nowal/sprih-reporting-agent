@@ -1,11 +1,14 @@
 """Application settings loaded from environment variables (prefix: SPRIH_)."""
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load ALL .env vars into os.environ (ANTHROPIC_API_KEY, LANGSMITH_*, SPRIH_*, etc.)
 # so every library (langchain, anthropic SDK, etc.) can read its own vars.
-load_dotenv()
+# Anchored to the repo root so the correct .env is loaded regardless of CWD.
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env", override=True)
 
 
 class Settings(BaseSettings):
