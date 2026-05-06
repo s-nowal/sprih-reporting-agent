@@ -40,18 +40,23 @@ _RESEARCH_DIR = (
 def _save_to_research(source_id: str, filename: str, content: bytes | str) -> None:
     """Write fetched content into the local research workspace folder.
 
-    Creates ``agent_folder/workspace/research/`` if it does not exist, then
-    writes ``content`` to ``{research_dir}/{filename}``.  Errors are logged but
-    never raised so a filesystem failure cannot abort the fetch.
+    Each file is written into its own subdirectory under ``research/``.
+    Markdown files use ``{stem}/content.md``; binary files use
+    ``{stem}/{filename}`` where ``stem`` is the filename without its extension.
+    Errors are logged but never raised so a filesystem failure cannot abort
+    the fetch.
 
     Args:
         source_id: Ingestion source id — used only for log messages.
-        filename: Target filename inside the research directory.
+        filename: Target filename (used to derive the subfolder name).
         content: Raw bytes (binary files) or a string (markdown pages).
     """
     try:
-        _RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
-        dest = _RESEARCH_DIR / filename
+        stem = Path(filename).stem
+        is_markdown = filename.lower().endswith(".md")
+        subfolder = _RESEARCH_DIR / stem
+        subfolder.mkdir(parents=True, exist_ok=True)
+        dest = subfolder / ("content.md" if is_markdown else filename)
         if isinstance(content, bytes):
             dest.write_bytes(content)
         else:

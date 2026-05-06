@@ -37,7 +37,7 @@ COPY sandbox-reporting_module/ ./sandbox-reporting_module/
 
 # Serve Vue SPA via nginx on port 80
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
-RUN printf 'server {\n    listen 80;\n    root /usr/share/nginx/html;\n    index index.html;\n    location /documents/ {\n        proxy_pass http://localhost:8000;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n    }\n    location /threads/ {\n        proxy_pass http://localhost:8000;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_buffering off;\n    }\n    location / {\n        try_files $uri $uri/ /index.html;\n    }\n}\n' \
+RUN printf 'server {\n    listen 80;\n    root /usr/share/nginx/html;\n    index index.html;\n    client_max_body_size 50m;\n    location ~ ^/(threads|documents|runs|assistants|sources|artifacts|info|health) {\n        proxy_pass http://localhost:8000;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_buffering off;\n    }\n    location / {\n        try_files $uri $uri/ /index.html;\n    }\n}\n' \
     > /etc/nginx/sites-available/default
 
 # supervisord
