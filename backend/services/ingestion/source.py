@@ -1,4 +1,8 @@
-"""Source document service — interface for S3 + DB implementation."""
+"""Source document service — interface for enterprise upload handling.
+
+Pending implementation — will handle storing uploaded files (PDF, Excel,
+DOCX, HTML) to enterprise bronze storage and creating data_sources rows.
+"""
 
 
 class SourceService:

@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init DB, storage, registry, checkpointer, agent service. Shutdown: close all."""
-    import aiosqlite
-    from pathlib import Path
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from contextlib import AsyncExitStack
 
+    from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
+
+    from backend.infra.db import get_checkpointer_url
     from backend.infra.registry import Registry, set_registry, teardown_registry
     from backend.services.agent import init_agent_service
 
@@ -26,24 +27,30 @@ async def lifespan(app: FastAPI):
     registry = await Registry.from_config(settings)
     set_registry(registry)
 
-    # --- Durable LangGraph checkpointer (SQLite) --------------------------------
-    # Persists conversation history (thread state) across server restarts so the
-    # LLM sees full message history on every turn within a thread.
-    checkpoints_path = Path(settings.storage_root) / "checkpoints.db"
-    checkpoints_path.parent.mkdir(parents=True, exist_ok=True)
-    db_conn = await aiosqlite.connect(str(checkpoints_path))
-    checkpointer = AsyncSqliteSaver(db_conn)
-    await checkpointer.setup()
-    logger.info("Checkpointer ready at %s", checkpoints_path)
+    # --- Durable LangGraph checkpointer (MariaDB) -------------------------------
+    # Persists conversation history (thread state) in the same MariaDB instance
+    # used for application data so backups, schema lifecycle, and connection
+    # management all live in one place. ``AIOMySQLSaver.from_conn_string``
+    # returns an async context manager that owns its aiomysql pool; binding it
+    # to ``AsyncExitStack`` ties the pool's lifetime to the FastAPI lifespan.
+    async with AsyncExitStack() as stack:
+        checkpointer = await stack.enter_async_context(
+            AIOMySQLSaver.from_conn_string(get_checkpointer_url())
+        )
+        await checkpointer.setup()
+        logger.info(
+            "Checkpointer ready (MariaDB %s/%s)",
+            settings.db_host,
+            settings.db_name,
+        )
 
-    init_agent_service(checkpointer)
-    logger.info("Agent service ready.")
+        init_agent_service(checkpointer)
+        logger.info("Agent service ready.")
 
-    yield
+        yield
 
-    await db_conn.close()
-    await teardown_registry()
-    logger.info("Infrastructure torn down.")
+        await teardown_registry()
+        logger.info("Infrastructure torn down.")
 
 
 app = FastAPI(

@@ -1,7 +1,8 @@
 """Job lifecycle service — CRUD for the ``jobs`` table.
 
-Any agent workflow (research, extraction, report generation) creates a job
-to track its execution.  This service is agent-agnostic.
+Jobs are cross-cutting: any flow (agent runs, cron refresh, ERP auto-load,
+internal research) creates a job to track its async execution. This service
+has no dependency on the agent layer.
 """
 
 from __future__ import annotations

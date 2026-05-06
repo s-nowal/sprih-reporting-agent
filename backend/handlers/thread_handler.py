@@ -11,7 +11,7 @@ from backend.schemas.threads import (
     ThreadUpdate,
 )
 from backend.security.auth import EnterpriseContext
-from backend.services import thread_service
+from backend.services.agent import thread as thread_service
 
 
 def _to_response(t: dict) -> ThreadResponse:

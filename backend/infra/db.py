@@ -16,6 +16,23 @@ def _get_url() -> str:
     )
 
 
+def get_checkpointer_url() -> str:
+    """Build the connection URL consumed by ``AIOMySQLSaver.from_conn_string``.
+
+    Uses the plain ``mysql://`` scheme expected by the langgraph-checkpoint-mysql
+    package, which manages its own aiomysql connection pool independently of
+    the SQLAlchemy engine. Sourced from the same ``settings`` fields as
+    ``_get_url`` so the two cannot drift apart.
+
+    Returns:
+        A ``mysql://user:password@host:port/db`` URL string.
+    """
+    return (
+        f"mysql://{settings.db_user}:{settings.db_password}"
+        f"@{settings.db_host}:{settings.db_port}/{settings.db_name}"
+    )
+
+
 def get_engine(echo: bool | None = None) -> AsyncEngine:
     """Return the shared async engine, creating it lazily on first call.
 

@@ -1,4 +1,4 @@
-"""Ingestion service — persists crawled content to bronze storage and DB.
+"""Bronze storage service — persists crawled content to S3 and the DB.
 
 Owns the bronze storage pipeline:
 - ``store_page``: save web page markdown to bronze + create ``data_sources`` row
@@ -6,7 +6,7 @@ Owns the bronze storage pipeline:
 - ``check_duplicate``: skip re-fetching a URL that has already been stored
 
 Search query provenance (recording queries, resolving result IDs) lives in
-``search_service``. This service is agent-agnostic.
+``ingestion.search``. This service is agent-agnostic.
 """
 
 from __future__ import annotations

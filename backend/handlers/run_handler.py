@@ -16,8 +16,10 @@ from fastapi import HTTPException
 from backend.handlers.thread_handler import _assert_ownership, _ensure_thread
 from backend.schemas.runs import RunCreate, RunResponse
 from backend.security.auth import EnterpriseContext
-from backend.services import job_service, thread_service, workspace_service
+from backend.services import job as job_service
 from backend.services.agent import get_agent_service
+from backend.services.agent import thread as thread_service
+from backend.services.agent import workspace as workspace_service
 
 logger = logging.getLogger(__name__)
 
