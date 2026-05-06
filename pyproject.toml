@@ -21,6 +21,8 @@ dependencies = [
     "crawl4ai>=0.8.6",
     "pymupdf>=1.25",
     "langgraph-checkpoint-sqlite>=3.0.3",
+    "mcp>=1.27.0",
+    "pyngrok>=8.0.0",
 ]
 
 [build-system]

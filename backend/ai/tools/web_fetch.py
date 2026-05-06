@@ -8,6 +8,14 @@ Routing:
 The tool itself only fetches — all storage writes and DB operations are
 handled by ``ingestion_service``. URL resolution from ``result_id`` is
 handled by ``search_service``.
+
+Two surfaces share one implementation:
+- ``fetch_url(result_id, job_id)``: plain async function — callable from
+  LangGraph, the MCP server, a script, anywhere. Returns the raw artifact
+  dict.
+- ``web_fetch``: the LangChain ``@tool`` wrapper that reads ``job_id`` from
+  ``RunnableConfig.configurable``, forwards to ``fetch_url``, and formats
+  the agent-facing ``(content, artifact)`` tuple.
 """
 
 from __future__ import annotations
@@ -129,6 +137,74 @@ async def _crawl_page(url: str) -> str | None:
         return None
 
 
+async def fetch_url(
+    result_id: str,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    """Resolve a ``result_id`` to its URL, fetch the content, and persist it.
+
+    Handles the full fetch pipeline:
+    1. Resolve ``result_id`` → URL via ``search_service``.
+    2. Global dedup check via ``ingestion_service.check_duplicate``.
+    3. Download (httpx for binaries, crawl4ai for web pages).
+    4. Persist to bronze storage + ``data_sources`` row via ``ingestion_service``.
+
+    Args:
+        result_id: UUID of a ``search_results`` row from a prior ``web_search``.
+        job_id: FK to the parent job (tracks which run triggered the fetch).
+            May be ``None`` for one-off / out-of-flow fetches.
+
+    Returns:
+        Dict with ``source_id``, ``source_type``, ``s3_bronze_path``,
+        ``preview``, and ``url``. On cache hit also includes ``duplicate=True``.
+        On failure contains ``error`` and ``source_id=None``.
+    """
+    # --- Resolve URL from the stored search result ---------------------------
+    search_result = await search_service.get_search_result(result_id)
+    if search_result is None:
+        return {
+            "source_id": None,
+            "error": f"result_id {result_id!r} not found",
+            "url": None,
+        }
+    url = search_result["url"]
+
+    # --- Global deduplication: skip if any job has already fetched this URL --
+    dup = await ingestion_service.check_duplicate(url)
+    if dup:
+        return {**dup, "url": url}
+
+    # --- PATH A: Binary content (PDF, Excel, etc.) ---------------------------
+    if _is_binary_url(url):
+        download = await _download_binary(url)
+        if download is None:
+            return {"source_id": None, "error": "Failed to download binary", "url": url}
+
+        raw_bytes, content_type, http_status = download
+        result = await ingestion_service.store_binary(
+            job_id=job_id,
+            search_result_id=result_id,
+            url=url,
+            raw_bytes=raw_bytes,
+            content_type=content_type,
+            http_status=http_status,
+        )
+        return {**result, "url": url}
+
+    # --- PATH B: Web page — crawl via crawl4ai (Playwright) ------------------
+    markdown = await _crawl_page(url)
+    if markdown is None:
+        return {"source_id": None, "error": "Failed to crawl page", "url": url}
+
+    result = await ingestion_service.store_page(
+        job_id=job_id,
+        search_result_id=result_id,
+        url=url,
+        markdown_content=markdown,
+    )
+    return {**result, "url": url}
+
+
 @tool(response_format="content_and_artifact")
 async def web_fetch(
     result_id: str,
@@ -159,51 +235,7 @@ async def web_fetch(
         Tuple of ``(content, artifact)`` where ``content`` is the agent-readable
         string and ``artifact`` is the raw storage result dict.
     """
-    # --- Read per-request config from LangGraph configurable -----------------
     job_id: str | None = config.get("configurable", {}).get("job_id")
-
-    # --- Resolve URL from the stored search result ---------------------------
-    search_result = await search_service.get_search_result(result_id)
-    if search_result is None:
-        error_msg = f"result_id {result_id!r} not found."
-        return error_msg, {"source_id": None, "error": error_msg}
-    url = search_result["url"]
-
-    # --- Global deduplication: skip if any job has already fetched this URL --
-    dup = await ingestion_service.check_duplicate(url)
-    if dup:
-        return _format_tool_content(url, dup), dup
-
-    # --- PATH A: Binary content (PDF, Excel, etc.) ---------------------------
-    if _is_binary_url(url):
-        download = await _download_binary(url)
-        if download is None:
-            artifact: dict[str, Any] = {
-                "source_id": None, "error": "Failed to download binary", "url": url
-            }
-            return f"Error: failed to download binary from {url}", artifact
-
-        raw_bytes, content_type, http_status = download
-        result = await ingestion_service.store_binary(
-            job_id=job_id,
-            search_result_id=result_id,
-            url=url,
-            raw_bytes=raw_bytes,
-            content_type=content_type,
-            http_status=http_status,
-        )
-        return _format_tool_content(url, result), result
-
-    # --- PATH B: Web page — crawl via crawl4ai (Playwright) ------------------
-    markdown = await _crawl_page(url)
-    if markdown is None:
-        artifact = {"source_id": None, "error": "Failed to crawl page", "url": url}
-        return f"Error: failed to crawl {url}", artifact
-
-    result = await ingestion_service.store_page(
-        job_id=job_id,
-        search_result_id=result_id,
-        url=url,
-        markdown_content=markdown,
-    )
+    result = await fetch_url(result_id=result_id, job_id=job_id)
+    url = result.get("url") or ""
     return _format_tool_content(url, result), result
