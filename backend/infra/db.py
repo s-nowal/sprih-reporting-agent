@@ -16,11 +16,18 @@ def _get_url() -> str:
     )
 
 
-def get_engine() -> AsyncEngine:
-    """Return the shared async engine, creating it lazily on first call."""
+def get_engine(echo: bool | None = None) -> AsyncEngine:
+    """Return the shared async engine, creating it lazily on first call.
+
+    Args:
+        echo: SQL echo flag passed to SQLAlchemy. Defaults to ``settings.debug``
+            when the engine is first created. Ignored on subsequent calls since
+            the singleton is already initialised.
+    """
     global _engine
     if _engine is None:
-        _engine = create_async_engine(_get_url(), echo=settings.debug, pool_recycle=3600)
+        effective_echo = settings.debug if echo is None else echo
+        _engine = create_async_engine(_get_url(), echo=effective_echo, pool_recycle=3600)
     return _engine
 
 
