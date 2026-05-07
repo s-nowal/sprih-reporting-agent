@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # Keys are graph names (assistant_id), values are subdir names. Anything
     # not listed (e.g. "workspace/", "reference/") stays in S3 only.
     drive_mirror_subdirs: dict[str, list[str]] = {
-        "reporting-agent": ["input", "output"],
+        "reporting-agent": ["input", "output", "research"],
     }
 
 

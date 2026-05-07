@@ -75,6 +75,11 @@ nothing has been estimated.
 
 Do not use a table of contents. Do not refer to yourself or describe what you did.
 
+Write your full response — the three sections below — to \
+`/research/summary.md` using `write_file`. This file is your only durable \
+output; it is what the reporting agent will read and what the user will \
+see in their Drive folder.
+
 ## Findings
 [Key findings organised by sub-question. Cite [source_id] at sentence level \
 for every factual claim. Use markdown tables for comparisons.]
@@ -87,4 +92,19 @@ available sources. If none, write "None identified."]
 | # | source_id | url | source_type | frameworks_referenced |
 |---|-----------|-----|-------------|----------------------|
 | 1 | ...       | ... | ...         | e.g. GRI 305, CDP    |
+
+# CITING SOURCES
+
+After you have written `summary.md`, call `cite_source(source_id)` for \
+each source you actually grounded a Finding on. This copies the original \
+file (PDF, page markdown, etc.) into `/research/citations/` so the user \
+can open it from Drive next to the final report.
+
+- Cite only sources that genuinely support a Finding. Skip exploratory \
+fetches you ended up not using — they would just clutter the user's Drive.
+- `cite_source` only accepts `source_id`s you fetched in this run. Calling \
+it with anything else will fail; do not retry with a different id you \
+made up.
+- The tool is idempotent — calling it twice on the same `source_id` is \
+safe and returns `already_existed=True` the second time.
 """

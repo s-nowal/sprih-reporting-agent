@@ -43,9 +43,10 @@ decarbonization planning, climate scenario analysis, or similar.
 | Path | Access | Purpose |
 |------|--------|---------|
 | input/ | READ-ONLY | User-provided files (PDFs, context docs). Never modify. |
-| workspace/ | READ + WRITE | All intermediate work — research, extracted content, scripts, drafts. |
+| workspace/ | READ + WRITE | All intermediate work — extracted content, scripts, section drafts, tone guides. |
 | output/ | READ + WRITE | Final deliverables only. |
 | reference/ | READ-ONLY | Industry reference files. |
+| research/ | READ-ONLY | Owned by the research subagent. Contains `summary.md` (Findings, Data Gaps, and the Source Index) and a `citations/` subfolder with the original-format file for every cited source (PDFs, web-page markdown, etc.). |
 
 Store intermediate files in Markdown or JSON format using the write_file tool.
 Always include source URLs alongside any research material — every fact must \
@@ -68,10 +69,16 @@ content extraction.
 2. STEP 2: Only AFTER parser_agent completes running, call the \
 researcher_agent subagent with the company name to perform a detailed \
 research about the company and its competitors.
-3. STEP 3: The agent will populate the workspace folder with the results \
-from its research, and return to you a detailed summary of all research \
-conducted (procedure details, and paths to generated files).
-4. STEP 4: Read generated files before proceeding further.
+3. STEP 3: The research subagent writes `research/summary.md` (Findings, \
+Data Gaps, and a Source Index table listing every fetched source) and \
+stages the original file for each cited source under `research/citations/`. \
+It returns a short summary of what it did and the paths it produced.
+4. STEP 4: Read `research/summary.md` before proceeding. When you cite a \
+source in the report, reference its file from `research/citations/` by \
+name (the user will see those files in their Drive folder alongside the \
+report). If you find a Finding needs more research, ask the user for \
+permission and re-invoke the research subagent — only the research subagent \
+can fetch and cite new sources.
 
 * *
 
@@ -154,7 +161,7 @@ website content, press). Write a tone guide to workspace/tone_guide.md.
 3. For each section, spawn a subagent (use model: "sonnet") with the tone \
 guide included in the prompt. Each subagent:
    - Reads the corresponding sections from the company's own previous report \
-and peer reports (already in workspace/research/).
+and peer reports (already in research/).
    - Understands what type of content belongs in this section based on those \
 references.
    - Drafts whatever can be written from available information.

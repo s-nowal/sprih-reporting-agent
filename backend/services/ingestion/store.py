@@ -4,6 +4,9 @@ Owns the bronze storage pipeline:
 - ``store_page``: save web page markdown to bronze + create ``data_sources`` row
 - ``store_binary``: save binary file (PDF, XLSX, …) to bronze + create ``data_sources`` row
 - ``check_duplicate``: skip re-fetching a URL that has already been stored
+- ``copy_source_to_workspace``: copy a fetched source's original bytes from
+  bronze into a thread's ``research/citations/`` folder so the user can open
+  the file from Drive next to the report.
 
 Search query provenance (recording queries, resolving result IDs) lives in
 ``ingestion.search``. This service is agent-agnostic.
@@ -14,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -341,4 +346,211 @@ async def store_binary(
         "s3_bronze_path": s3_bronze_path,
         "source_type": source_type,
         "preview": preview,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Citation copy — bronze → workspace research/citations/
+# ---------------------------------------------------------------------------
+
+_FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _sanitize_basename(value: str) -> str:
+    """Replace filesystem-unfriendly characters in a filename with underscores.
+
+    Args:
+        value: Candidate basename (already URL-decoded).
+
+    Returns:
+        A name containing only ``[A-Za-z0-9._-]`` runs, with collapsed
+        underscores trimmed at the edges.
+    """
+    cleaned = _FILENAME_SAFE.sub("_", value).strip("._")
+    return cleaned or ""
+
+
+def _derive_citation_filename(
+    source_id: str, source_ref: str, source_type: str
+) -> str:
+    """Build a human-friendly filename for a cited source.
+
+    Strategy: take the URL's basename (URL-decoded, sanitized), prepend a
+    short ``source_id`` prefix to avoid collisions, and ensure the extension
+    matches the source type. Falls back to ``{prefix}_source.{ext}`` when the
+    URL has no usable basename (e.g. ``https://example.com/about``).
+
+    Args:
+        source_id: UUID of the ``data_sources`` row.
+        source_ref: Original URL that was fetched.
+        source_type: ``"web_page"`` (markdown) or ``"web_<ext>"`` (binary).
+
+    Returns:
+        Basename suitable for ``research/citations/<basename>``.
+    """
+    short = source_id.replace("-", "")[:8]
+
+    # --- Determine target extension ----------------------------------------
+    if source_type == "web_page":
+        target_ext = "md"
+    elif source_type.startswith("web_"):
+        target_ext = source_type.split("_", 1)[1] or "bin"
+    else:
+        target_ext = "bin"
+
+    # --- Pull a usable basename from the URL -------------------------------
+    parsed = urlparse(source_ref)
+    raw = unquote((parsed.path or "").rsplit("/", 1)[-1]) or parsed.netloc
+    base = _sanitize_basename(raw)
+
+    if not base:
+        return f"{short}_source.{target_ext}"
+
+    # If the basename already ends with the desired extension, keep it; else
+    # append the extension so Drive can pick the right viewer.
+    if "." in base:
+        stem, _, ext = base.rpartition(".")
+        if ext.lower() == target_ext.lower():
+            return f"{short}_{stem}.{ext}"
+        return f"{short}_{stem}_{ext}.{target_ext}"
+    return f"{short}_{base}.{target_ext}"
+
+
+def _bronze_content_key(s3_bronze_path: str, source_type: str) -> str:
+    """Compute the storage key of the original bytes for a fetched source.
+
+    Web pages are stored as ``content.md``; binaries are stored as
+    ``original.<ext>`` where ``<ext>`` is the suffix of ``source_type``.
+
+    Args:
+        s3_bronze_path: Bronze directory key from ``data_sources`` row,
+            including its trailing slash.
+        source_type: ``"web_page"`` or ``"web_<ext>"``.
+
+    Returns:
+        Storage-relative key of the original-bytes file in bronze.
+    """
+    if source_type == "web_page":
+        return f"{s3_bronze_path}content.md"
+    ext = source_type.split("_", 1)[1] if "_" in source_type else "bin"
+    return f"{s3_bronze_path}original.{ext}"
+
+
+async def copy_source_to_workspace(
+    source_id: str,
+    *,
+    enterprise_id: str,
+    thread_id: str,
+    job_id: str | None,
+) -> dict[str, Any]:
+    """Copy a cited source's original bytes from bronze into ``research/citations/``.
+
+    Enforces two scoping rules so the agent can't cite arbitrary historical
+    content:
+    - The ``DataSource`` row must be public (``enterprise_id IS NULL``) or
+      belong to the calling enterprise.
+    - The row's ``job_id`` must equal the current run's ``job_id`` — i.e. the
+      source must have been fetched during this run.
+
+    Idempotent: if the destination key already exists, returns success
+    without re-reading bronze or rewriting.
+
+    Args:
+        source_id: ``data_sources.id`` of the source to cite.
+        enterprise_id: Tenant id of the calling agent.
+        thread_id: Thread id of the calling agent (scopes the destination).
+        job_id: Current run's job id; sources fetched outside this job are
+            rejected. ``None`` (no active job) always rejects.
+
+    Returns:
+        Dict with ``path`` (workspace-relative virtual path),
+        ``size_bytes``, ``source_ref``, ``source_type``, and
+        ``already_existed: bool`` on success. Returns a dict with ``error``
+        on validation/lookup failure (the calling tool surfaces this to the
+        agent as a tool message).
+    """
+    # --- Lookup -------------------------------------------------------------
+    db = get_db()
+    async with db() as session:
+        row = await session.get(DataSource, source_id)
+        if row is None:
+            return {"error": f"source_id {source_id!r} not found"}
+
+        # Capture fields up front; the row is detached after the session closes.
+        row_enterprise_id = row.enterprise_id
+        row_job_id = row.job_id
+        row_source_ref = row.source_ref
+        row_source_type = row.source_type
+        row_bronze_path = row.s3_bronze_path
+
+    # --- Enterprise scoping -------------------------------------------------
+    if row_enterprise_id is not None and row_enterprise_id != enterprise_id:
+        return {
+            "error": (
+                f"source_id {source_id!r} belongs to a different enterprise"
+            )
+        }
+
+    # --- Run scoping --------------------------------------------------------
+    if job_id is None or row_job_id != job_id:
+        return {
+            "error": (
+                f"source_id {source_id!r} was not fetched in the current run "
+                "(only sources fetched in this run can be cited)"
+            )
+        }
+
+    if not row_bronze_path:
+        return {"error": f"source_id {source_id!r} has no bronze content stored"}
+
+    # Lazy import to break the circular chain
+    # (services.agent → langgraph_service → reporting_agent → research_agent
+    # → tools.cite_source → services.ingestion.store).
+    from backend.services.agent.workspace import workspace_prefix
+
+    # --- Compute keys -------------------------------------------------------
+    storage = get_storage()
+    bronze_key = _bronze_content_key(row_bronze_path, row_source_type)
+    filename = _derive_citation_filename(source_id, row_source_ref, row_source_type)
+    dest_key = (
+        f"{workspace_prefix(enterprise_id, thread_id)}/research/citations/{filename}"
+    )
+    virtual_path = f"/research/citations/{filename}"
+
+    # --- Idempotency check --------------------------------------------------
+    if storage.exists(dest_key):
+        try:
+            size_bytes = sum(
+                obj["size"] for obj in storage.list_objects(dest_key)
+            )
+        except Exception:  # noqa: BLE001 — listing failure shouldn't block return
+            size_bytes = 0
+        return {
+            "path": virtual_path,
+            "size_bytes": size_bytes,
+            "source_ref": row_source_ref,
+            "source_type": row_source_type,
+            "already_existed": True,
+        }
+
+    # --- Copy bytes ---------------------------------------------------------
+    if not storage.exists(bronze_key):
+        return {
+            "error": (
+                f"bronze content for source_id {source_id!r} not found at "
+                f"{bronze_key!r}"
+            )
+        }
+    content = storage.read(bronze_key)
+    storage.write(dest_key, content)
+    logger.info(
+        "cite_source: copied %s (%d bytes) → %s",
+        source_id, len(content), dest_key,
+    )
+    return {
+        "path": virtual_path,
+        "size_bytes": len(content),
+        "source_ref": row_source_ref,
+        "source_type": row_source_type,
+        "already_existed": False,
     }

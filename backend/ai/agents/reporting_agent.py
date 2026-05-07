@@ -6,23 +6,30 @@ Uses ``create_deep_agent`` from the ``deepagents`` package which provides:
 - Policy-based file access control (input/ and reference/ are read-only)
 
 The Research Agent is wired as a ``CompiledSubAgent`` — its compiled
-LangGraph graph is passed directly via the ``runnable`` key, so the
-research agent's definition lives in one place (``research_agent.py``).
+LangGraph graph is built fresh per-run inside ``build_reporting_graph``
+because it needs the same ``workspace_prefix`` as the parent so the two
+agents share a single S3-backed view of the thread workspace. The
+research agent is allowed to write only under ``/research/``; the parent
+has read-only access to that directory.
+
+Storage is S3-style: the agent reads and writes through ``S3Backend``,
+which talks to whatever ``get_storage()`` returns (today: ``LocalStorage``;
+later: a real ``BotoS3Storage``). No local temp directory is involved.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from deepagents import CompiledSubAgent, create_deep_agent
-from deepagents.backends import FilesystemBackend
-from deepagents.backends.protocol import EditResult, WriteResult
+from deepagents.backends.protocol import BackendProtocol, EditResult, WriteResult
 from langchain.chat_models import init_chat_model
 
 from backend.ai.agents.research_agent import build_research_graph
 from backend.ai.prompts.agents.reporting import REPORTING_SYSTEM_PROMPT
 from backend.ai.tools.user_input import request_user_input
+from backend.infra.registry import get_storage
+from backend.services.agent.s3_backend import S3Backend
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -33,19 +40,42 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 class _PolicyWrapper:
-    """Wraps a ``FilesystemBackend`` to deny writes under specified prefixes.
+    """Wraps a backend to constrain which prefixes accept writes/edits.
+
+    Two complementary policy modes can be combined on a single wrapper:
+
+    - ``deny_prefixes``: writes and edits under any of these prefixes are
+      blocked (read-only). Used by the parent reporting agent to lock
+      ``input/``, ``reference/``, and ``research/``.
+    - ``allow_only_prefixes``: writes and edits are blocked unless the
+      target path falls under one of these prefixes. Used by the research
+      subagent so it can only write inside ``/research/``.
 
     Args:
         inner: The underlying backend to delegate to.
         deny_prefixes: Directory prefixes where writes and edits are blocked
-            (e.g. ``["input", "reference"]``).
+            (e.g. ``["input", "reference", "research"]``).
+        allow_only_prefixes: When set, writes and edits are denied unless
+            the target falls under one of these prefixes (e.g.
+            ``["research"]``). ``None`` disables the allowlist check.
     """
 
-    def __init__(self, inner: FilesystemBackend, deny_prefixes: list[str]) -> None:
+    def __init__(
+        self,
+        inner: BackendProtocol,
+        deny_prefixes: list[str] | None = None,
+        allow_only_prefixes: list[str] | None = None,
+    ) -> None:
         self.inner = inner
-        self.deny = [
+        self.deny = self._normalize(deny_prefixes or [])
+        self.allow_only = self._normalize(allow_only_prefixes or []) or None
+
+    @staticmethod
+    def _normalize(prefixes: list[str]) -> list[str]:
+        """Coerce prefixes to ``"/<name>/"`` form for prefix matching."""
+        return [
             (p if p.startswith("/") else "/" + p).rstrip("/") + "/"
-            for p in deny_prefixes
+            for p in prefixes
         ]
 
     def __getattr__(self, name: str):
@@ -53,8 +83,15 @@ class _PolicyWrapper:
         return getattr(self.inner, name)
 
     def _is_denied(self, path: str) -> bool:
+        """True if ``path`` is blocked by either policy mode."""
         normalized = path if path.startswith("/") else "/" + path
-        return any(normalized.startswith(p) for p in self.deny)
+        if any(normalized.startswith(p) for p in self.deny):
+            return True
+        if self.allow_only is not None and not any(
+            normalized.startswith(p) for p in self.allow_only
+        ):
+            return True
+        return False
 
     def write(self, file_path: str, content: str):
         """Block writes to denied directories, delegate otherwise."""
@@ -82,41 +119,26 @@ class _PolicyWrapper:
 
 
 # ---------------------------------------------------------------------------
-# Subagent definitions
-# ---------------------------------------------------------------------------
-# The research agent is built as a compiled LangGraph graph and passed via
-# CompiledSubAgent. No checkpointer needed — the parent agent manages state.
-
-_researcher_subagent: CompiledSubAgent = {
-    "name": "researcher-agent",
-    "description": (
-        "Performs detailed ESG research for a company and its peers. "
-        "Call this subagent with the company name to search the web, "
-        "crawl relevant pages, and generate research reports."
-    ),
-    "runnable": build_research_graph(checkpointer=None),
-}
-
-
-# ---------------------------------------------------------------------------
 # Graph builder
 # ---------------------------------------------------------------------------
 
 def build_reporting_graph(
-    workspace_root: Path,
+    workspace_prefix: str,
     checkpointer: BaseCheckpointSaver | None = None,
 ):
     """Build and return the compiled reporting agent graph.
 
-    A fresh graph is built per-run because the ``workspace_root`` differs
-    for each thread (isolated temp directory).  This is cheap — it just
-    wires nodes and edges; the checkpointer is a shared singleton passed in
-    by the caller so conversation history persists across runs.
+    A fresh graph is built per-run because the ``workspace_prefix`` differs
+    for each thread. The research subagent is also built here (rather than
+    at module import time) so it can be wired with an ``S3Backend`` rooted
+    at the same workspace prefix — that way files the subagent writes under
+    ``/research/`` are immediately visible to the parent's ``ls`` / ``read``
+    / ``grep`` tools, and the parent's mirror sync picks them up for Drive.
 
     Args:
-        workspace_root: Absolute path to the temp workspace directory for
-            this run. Must contain input/, workspace/, output/, reference/
-            subdirectories.
+        workspace_prefix: Storage key prefix for this thread's workspace
+            (e.g. ``"enterprise/{eid}/workspaces/{tid}"``). Every file
+            operation issued by either agent is scoped under this prefix.
         checkpointer: Shared checkpointer for thread-scoped state persistence.
             Pass the same instance across all runs so the LLM sees the full
             conversation history on each turn.
@@ -124,16 +146,39 @@ def build_reporting_graph(
     Returns:
         A compiled LangGraph ``StateGraph`` ready for ``ainvoke`` / ``astream``.
     """
+    # --- Research subagent: shares the workspace, scoped to /research/ -------
+    # The subagent gets its own S3Backend (same prefix as the parent) wrapped
+    # in a policy that allows writes only under /research/. The cite_source
+    # tool registered on the research graph writes citations directly via the
+    # raw storage adapter (see backend/services/ingestion/store.py), so the
+    # allowlist on the wrapper covers the agent's own write_file/edit_file
+    # tool calls.
+    researcher_subagent: CompiledSubAgent = {
+        "name": "researcher-agent",
+        "description": (
+            "Performs detailed ESG research for a company and its peers. "
+            "Call this subagent with the company name to search the web, "
+            "crawl relevant pages, and generate research reports."
+        ),
+        "runnable": build_research_graph(
+            checkpointer=None,
+            backend=_PolicyWrapper(
+                inner=S3Backend(storage=get_storage(), prefix=workspace_prefix),
+                allow_only_prefixes=["research"],
+            ),
+        ),
+    }
+
     return create_deep_agent(
         model=init_chat_model(
             model="anthropic:claude-sonnet-4-6",
             max_retries=10,
             timeout=300,
         ),
-        subagents=[_researcher_subagent],
+        subagents=[researcher_subagent],
         backend=lambda rt: _PolicyWrapper(
-            inner=FilesystemBackend(root_dir=workspace_root, virtual_mode=True),
-            deny_prefixes=["input", "reference"],
+            inner=S3Backend(storage=get_storage(), prefix=workspace_prefix),
+            deny_prefixes=["input", "reference", "research"],
         ),
         tools=[request_user_input],
         checkpointer=checkpointer,
