@@ -2,6 +2,8 @@
 node_modules
 /dist
 
+# Re-include ribbon icons — root .gitignore blocks all *.png.
+!public/assets/*.png
 
 # local env files
 .env.local
