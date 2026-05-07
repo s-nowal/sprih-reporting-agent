@@ -15,6 +15,10 @@ services:
       SPRIH_AUTH_DEV_MODE: "true"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       SERPER_API_KEY: ${SERPER_API_KEY:-}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-}
     depends_on:
       mariadb:
         condition: service_healthy
