@@ -30,5 +30,27 @@ class Settings(BaseSettings):
     storage_root: str = "./data/s3"
     storage_backend: str = "local"  # "local" | "s3" — add branches in storage.get_storage()
 
+    # --- Default enterprise (dev) --------------------------------------------
+    # The auth dev-mode bypass uses this when no x-enterprise-id header is sent.
+    # Also used as the seed enterprise row at startup so foreign-key references
+    # (jobs, threads, google_credentials) resolve in a fresh database.
+    default_enterprise_id: str = "sprih"
+    default_enterprise_name: str = "Sprih"
+
+    # --- Google Drive integration --------------------------------------------
+    # OAuth client credentials for the "Sprih agent" GCP project. The agent
+    # signs in once as the workspace user (e.g. sachchit.vekaria@sprih.com)
+    # and the resulting refresh token is stored per enterprise.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+
+    # Per-agent mirror policy: which workspace subdirectories sync to Drive.
+    # Keys are graph names (assistant_id), values are subdir names. Anything
+    # not listed (e.g. "workspace/", "reference/") stays in S3 only.
+    drive_mirror_subdirs: dict[str, list[str]] = {
+        "reporting-agent": ["input", "output"],
+    }
+
 
 settings = Settings()

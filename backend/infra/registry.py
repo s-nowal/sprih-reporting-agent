@@ -62,8 +62,8 @@ class Registry:
     async def from_config(cls, settings: Any) -> Registry:
         """Build a fully-initialised registry from application settings.
 
-        Runs DB table creation, then registers the storage adapter and session
-        factory based on the provided settings.
+        Runs DB table creation, seeds the default enterprise row, then
+        registers the storage adapter and session factory.
 
         Args:
             settings: Application settings (``backend.config.Settings``).
@@ -83,6 +83,7 @@ class Registry:
         reg = cls()
         reg.register("storage", get_storage(settings))
         reg.register("db", make_session_factory())
+        await _seed_default_enterprise(settings)
         return reg
 
     async def close(self) -> None:
@@ -151,5 +152,35 @@ def get_db() -> async_sessionmaker[AsyncSession]:
     if _registry is None:
         raise RuntimeError("Registry not initialised — call set_registry() at startup")
     return _registry.get("db")
+
+
+async def _seed_default_enterprise(settings: Any) -> None:
+    """Insert the dev/default enterprise row if it doesn't exist yet.
+
+    Idempotent — uses INSERT ... ON DUPLICATE KEY UPDATE name=name (a no-op).
+    Called once at startup. Required because every thread / job / google
+    credentials row references ``enterprise_id`` and the dev-mode auth bypass
+    uses ``settings.default_enterprise_id``.
+
+    Args:
+        settings: Application settings — supplies the id and display name.
+    """
+    from sqlalchemy.dialects.mysql import insert
+
+    from backend.infra.db import make_session_factory
+    from backend.models.enterprise import Enterprise
+
+    factory = make_session_factory()
+    async with factory() as session:
+        stmt = insert(Enterprise).values(
+            enterprise_id=settings.default_enterprise_id,
+            name=settings.default_enterprise_name,
+        )
+        # ON DUPLICATE: keep existing row untouched (no-op update on PK).
+        stmt = stmt.on_duplicate_key_update(
+            enterprise_id=stmt.inserted.enterprise_id,
+        )
+        await session.execute(stmt)
+        await session.commit()
 
 

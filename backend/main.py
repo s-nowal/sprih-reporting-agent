@@ -7,7 +7,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
-from backend.routers import artifacts, assistants, runs, sources, threads
+from backend.routers import (
+    artifacts,
+    assistants,
+    google_auth,
+    runs,
+    sources,
+    threads,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +80,7 @@ app.include_router(threads.router)
 app.include_router(runs.router)
 app.include_router(sources.router)
 app.include_router(artifacts.router)
+app.include_router(google_auth.router)
 
 
 @app.get("/health")

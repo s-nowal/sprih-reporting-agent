@@ -62,7 +62,9 @@ async def get_enterprise_context(
 
     # 2. Dev mode bypass
     if settings.auth_dev_mode:
-        enterprise_id = request.headers.get("x-enterprise-id", "dev-enterprise")
+        enterprise_id = request.headers.get(
+            "x-enterprise-id", settings.default_enterprise_id
+        )
         return EnterpriseContext(
             enterprise_id=enterprise_id,
             user_id="dev-user",
