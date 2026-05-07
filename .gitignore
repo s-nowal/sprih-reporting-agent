@@ -34,7 +34,7 @@ uv.lock
 
 # Data
 data/
-*.png
+/*.png
 
 # Research artifacts
 deep_agent_research*
