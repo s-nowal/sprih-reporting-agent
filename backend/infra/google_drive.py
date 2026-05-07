@@ -5,12 +5,13 @@ I/O — no business logic, no DB access. The sync service composes these
 primitives into the per-turn sync_in / sync_out workflows.
 
 The wrapper accepts an OAuth ``Credentials`` object built from a refresh
-token (the long-lived secret stored per enterprise in ``google_credentials``).
+token (the long-lived secret stored per enterprise in ``mirror_credentials``).
 Access tokens are minted automatically by the underlying library.
 
 The Drive API is **synchronous**. Callers should run ``GoogleDriveClient``
 methods in a thread (``asyncio.to_thread``) so they don't block the event
-loop. The async wrappers in ``drive_sync_service`` do this.
+loop. The shared sync orchestration in
+:mod:`backend.services.mirror.base` does this for the provider primitives.
 """
 
 from __future__ import annotations

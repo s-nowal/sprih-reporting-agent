@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # --- Default enterprise (dev) --------------------------------------------
     # The auth dev-mode bypass uses this when no x-enterprise-id header is sent.
     # Also used as the seed enterprise row at startup so foreign-key references
-    # (jobs, threads, google_credentials) resolve in a fresh database.
+    # (jobs, threads, mirror_credentials) resolve in a fresh database.
     default_enterprise_id: str = "sprih"
     default_enterprise_name: str = "Sprih"
 

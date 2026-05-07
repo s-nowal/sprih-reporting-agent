@@ -1,26 +1,25 @@
 """OAuth 2.0 flow for connecting an enterprise's Google Drive.
 
-Two endpoints implement the standard "authorization code with offline access"
-flow used to obtain a long-lived refresh token:
+Endpoints:
 
-1. ``GET  /auth/google/start``   — returns the Google consent URL to open.
-2. ``GET  /auth/google/callback`` — Google redirects here with ``code`` and
-   ``state`` (= the enterprise_id we passed in). We exchange the code for
-   tokens and persist the refresh token in ``google_credentials``.
+1. ``GET  /auth/google/start``    — returns the Google consent URL.
+2. ``GET  /auth/google/callback`` — exchanges the auth code for tokens and
+   persists the refresh token in ``mirror_credentials`` under provider
+   ``google_drive``.
+3. ``GET  /auth/google/status``   — Google-specific connection summary.
+4. ``POST /auth/google/parent-folder`` — record the shared "Sprih" folder
+   ID after verifying access via the ``GoogleDriveMirrorProvider``.
 
-Helpers:
-
-3. ``GET  /auth/google/status``  — for dev / debugging.
-4. ``POST /auth/google/parent-folder`` — set the shared "Sprih" folder ID
-   after the user has shared it with the agent's Google account.
-
-The flow is intentionally minimal — auth on these endpoints uses the same
-dev-mode bypass as the rest of the app. In production the start/callback
-URLs would sit behind admin auth.
+This router is intentionally Google-specific. A future SharePoint provider
+would get its own ``/auth/microsoft/...`` router with its own scopes and
+token endpoints. The shared mirror runtime in
+``backend.services.mirror`` consumes whatever credentials rows the
+provider-specific routers persist.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from urllib.parse import urlencode
 
@@ -39,23 +38,26 @@ from backend.schemas.google_auth import (
     StatusResponse,
 )
 from backend.security.auth import EnterpriseContext, get_enterprise_context
-from backend.services import drive_sync_service
+from backend.services import mirror
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth/google", tags=["google-auth"])
 
-
 GOOGLE_AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+
+# Provider key under which Google credentials are stored in mirror_credentials.
+# Matches GoogleDriveMirrorProvider.provider_name.
+PROVIDER_KEY = "google_drive"
 
 
 def _require_oauth_settings() -> None:
     """Raise 503 if the OAuth client isn't configured.
 
-    The other Drive-aware code paths silently no-op when credentials are
-    missing, but the auth endpoints can't function at all without an OAuth
-    client, so we surface a clear error here.
+    The mirror runtime silently no-ops when credentials are missing, but
+    these endpoints can't function at all without an OAuth client, so
+    surface the misconfiguration loudly.
 
     Raises:
         HTTPException 503: If client id/secret aren't set in settings.
@@ -69,6 +71,26 @@ def _require_oauth_settings() -> None:
                 "SPRIH_GOOGLE_OAUTH_CLIENT_SECRET in .env and restart."
             ),
         )
+
+
+async def _google_status(enterprise_id: str) -> StatusResponse:
+    """Return the Google-specific subset of the mirror status.
+
+    Args:
+        enterprise_id: Tenant id.
+
+    Returns:
+        ``StatusResponse`` populated from the ``google_drive`` row, or
+        an empty status if no Google credentials exist.
+    """
+    creds = await mirror.credentials.load(enterprise_id, PROVIDER_KEY)
+    if creds is None:
+        return StatusResponse(connected=False)
+    return StatusResponse(
+        connected=True,
+        agent_email=creds.agent_email,
+        drive_parent_folder_id=creds.parent_folder_id,
+    )
 
 
 @router.get("/start", response_model=StartAuthResponse)
@@ -85,9 +107,8 @@ async def start(
 
     Returns:
         ``StartAuthResponse`` with the authorize_url. Open it in a browser,
-        sign in as the agent's Google account (e.g.
-        ``sachchit.vekaria@sprih.com``), grant the Drive scope, and accept
-        the redirect.
+        sign in as the agent's Google account, grant the Drive scope, and
+        accept the redirect.
     """
     _require_oauth_settings()
 
@@ -117,16 +138,17 @@ async def callback(request: Request) -> HTMLResponse:
     * ``state`` — the enterprise_id we passed in ``/start``.
     * ``error`` — present only if the user denied or something went wrong.
 
-    On success, persists the refresh token in ``google_credentials`` and
-    renders a small confirmation HTML page so a human running through the
+    On success, persists the refresh token via
+    :func:`mirror.credentials.store` under provider ``google_drive``.
+    Renders a small confirmation HTML page so a human running through the
     flow in the browser sees something useful.
 
     Returns:
         An HTML response describing success (or the error from Google).
 
     Raises:
-        HTTPException 400: If the callback is missing the ``code`` or
-            ``state`` parameters, or the token exchange fails.
+        HTTPException 400: If the callback is missing ``code`` / ``state``,
+            or the token exchange fails.
     """
     _require_oauth_settings()
 
@@ -183,18 +205,21 @@ async def callback(request: Request) -> HTMLResponse:
         )
 
     # --- Look up the email this token belongs to ----------------------------
+    # Build a one-shot Drive client to call about.get; we can't use the
+    # MirrorProvider abstraction yet because no credentials row exists.
     creds = credentials_from_refresh_token(refresh_token, scopes=scope.split())
-    creds.token = access_token  # avoid an immediate refresh round-trip
+    creds.token = access_token  # skip an immediate refresh round-trip
     client = GoogleDriveClient(creds)
     agent_email = client.get_email()
 
-    # --- Persist -------------------------------------------------------------
-    await drive_sync_service.store_credentials(
+    # --- Persist via the generalised mirror credentials store ---------------
+    await mirror.credentials.store(
         enterprise_id=state,
+        provider=PROVIDER_KEY,
         refresh_token=refresh_token,
         agent_email=agent_email,
         scopes=scope.split(),
-        drive_parent_folder_id=None,  # set later via /parent-folder
+        parent_folder_id=None,  # set later via /parent-folder
     )
 
     return HTMLResponse(
@@ -217,17 +242,16 @@ async def callback(request: Request) -> HTMLResponse:
 async def status(
     enterprise: EnterpriseContext = Depends(get_enterprise_context),
 ) -> StatusResponse:
-    """Return whether this enterprise has connected Drive and which folder.
+    """Return whether this enterprise has connected Google Drive.
 
     Args:
         enterprise: Caller's enterprise context.
 
     Returns:
         ``StatusResponse`` with ``connected``, ``agent_email`` and
-        ``drive_parent_folder_id``.
+        ``drive_parent_folder_id`` for the Google provider only.
     """
-    s = await drive_sync_service.get_status(enterprise.enterprise_id)
-    return StatusResponse(**s)
+    return await _google_status(enterprise.enterprise_id)
 
 
 @router.post("/parent-folder", response_model=StatusResponse)
@@ -235,7 +259,7 @@ async def set_parent_folder(
     body: SetParentFolderRequest,
     enterprise: EnterpriseContext = Depends(get_enterprise_context),
 ) -> StatusResponse:
-    """Record the shared "Sprih" parent folder ID for this enterprise.
+    """Record the shared "Sprih" parent folder ID after verifying access.
 
     The enterprise admin (or, in test, ``write.to.sachchit@gmail.com``)
     creates a folder named ``Sprih`` in their Drive, shares it with the
@@ -249,15 +273,11 @@ async def set_parent_folder(
         Updated ``StatusResponse``.
 
     Raises:
-        HTTPException 400: If the agent can't access the folder (e.g. it
-            wasn't shared) or the folder doesn't exist.
+        HTTPException 400: If the agent can't access the folder.
         HTTPException 404: If the enterprise hasn't connected Drive yet.
     """
-    # --- Verify the agent can actually see this folder before we persist ---
-    import asyncio
-
-    creds_row = await drive_sync_service._load_credentials(enterprise.enterprise_id)
-    if creds_row is None:
+    provider = await mirror.get_provider_for(enterprise.enterprise_id, PROVIDER_KEY)
+    if provider is None:
         raise HTTPException(
             status_code=404,
             detail=(
@@ -266,32 +286,26 @@ async def set_parent_folder(
             ),
         )
 
-    def _verify() -> None:
-        client = drive_sync_service._build_client(creds_row)
-        # If we can list the folder, we have access. Failure here means the
-        # user hasn't shared the folder with the agent's account yet.
-        client.list_files_recursive(body.drive_parent_folder_id)
-
+    # --- Verify the agent can list the folder before we persist -------------
     try:
-        await asyncio.to_thread(_verify)
+        await provider.verify_folder_access(body.drive_parent_folder_id)
     except Exception as exc:
         logger.exception("Cannot access parent folder %s", body.drive_parent_folder_id)
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Cannot access folder {body.drive_parent_folder_id}. "
-                f"Make sure it has been shared with {creds_row.agent_email} "
+                f"Make sure it has been shared with {provider._creds.agent_email} "
                 f"as Editor. ({type(exc).__name__}: {exc})"
             ),
         )
 
-    ok = await drive_sync_service.set_parent_folder(
-        enterprise.enterprise_id, body.drive_parent_folder_id
+    ok = await mirror.credentials.set_parent_folder(
+        enterprise.enterprise_id, PROVIDER_KEY, body.drive_parent_folder_id
     )
     if not ok:
         raise HTTPException(
             status_code=404, detail="Credentials row missing — re-run /start."
         )
 
-    s = await drive_sync_service.get_status(enterprise.enterprise_id)
-    return StatusResponse(**s)
+    return await _google_status(enterprise.enterprise_id)

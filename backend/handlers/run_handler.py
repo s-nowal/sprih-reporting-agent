@@ -16,8 +16,8 @@ from fastapi import HTTPException
 from backend.handlers.thread_handler import _assert_ownership, _ensure_thread
 from backend.schemas.runs import RunCreate, RunResponse
 from backend.security.auth import EnterpriseContext
-from backend.services import drive_sync_service
 from backend.services import job as job_service
+from backend.services import mirror
 from backend.services.agent import get_agent_service
 from backend.services.agent import thread as thread_service
 from backend.services.agent import workspace as workspace_service
@@ -160,22 +160,25 @@ async def stream_run(
     except Exception as e:
         logger.warning("Failed to create job: %s", e)
 
-    # --- Provision Drive folder + pull user edits before checkout -----------
-    # No-ops if the enterprise hasn't connected Drive (no credentials row).
+    # --- Provision mirror folder + pull user edits before checkout ----------
+    # No-ops if the enterprise hasn't connected any mirror provider.
+    mirror_provider = None
     try:
-        await drive_sync_service.setup_thread_folder(
-            enterprise_id=enterprise.enterprise_id,
-            thread_id=thread_id,
-            agent_name=data.assistant_id,
-        )
-        await drive_sync_service.sync_in(
-            enterprise_id=enterprise.enterprise_id,
-            thread_id=thread_id,
-            agent_name=data.assistant_id,
-        )
+        mirror_provider = await mirror.get_provider(enterprise.enterprise_id)
+        if mirror_provider is not None:
+            await mirror_provider.setup_thread_folder(
+                enterprise_id=enterprise.enterprise_id,
+                thread_id=thread_id,
+                agent_name=data.assistant_id,
+            )
+            await mirror_provider.sync_in(
+                enterprise_id=enterprise.enterprise_id,
+                thread_id=thread_id,
+                agent_name=data.assistant_id,
+            )
     except Exception as e:
-        # Drive issues should not break the agent run — log and continue.
-        logger.warning("Drive sync_in failed for thread %s: %s", thread_id, e)
+        # Mirror issues should not break the agent run — log and continue.
+        logger.warning("Mirror sync_in failed for thread %s: %s", thread_id, e)
 
     # --- Checkout workspace (isolated temp dir) ------------------------------
     temp_workspace = await workspace_service.checkout(
@@ -227,15 +230,16 @@ async def stream_run(
             temp_dir=temp_workspace,
         )
 
-        # --- Push agent writes back to Drive (no-op if not connected) -------
+        # --- Push agent writes back to the mirror (no-op if not connected) --
         try:
-            await drive_sync_service.sync_out(
-                enterprise_id=enterprise.enterprise_id,
-                thread_id=thread_id,
-                agent_name=data.assistant_id,
-            )
+            if mirror_provider is not None:
+                await mirror_provider.sync_out(
+                    enterprise_id=enterprise.enterprise_id,
+                    thread_id=thread_id,
+                    agent_name=data.assistant_id,
+                )
         except Exception as e:
-            logger.warning("Drive sync_out failed for thread %s: %s", thread_id, e)
+            logger.warning("Mirror sync_out failed for thread %s: %s", thread_id, e)
 
         if job_id:
             await job_service.update_status(job_id, "completed")
