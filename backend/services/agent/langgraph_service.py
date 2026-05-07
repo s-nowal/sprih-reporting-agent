@@ -104,7 +104,7 @@ class LangGraphAgentService(AgentService):
         thread_id: str,
         input_data: dict[str, Any],
         *,
-        enterprise_id: str = "dev-enterprise",
+        enterprise_id: str,
         job_id: str | None = None,
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
@@ -135,7 +135,7 @@ class LangGraphAgentService(AgentService):
         thread_id: str,
         input_data: dict[str, Any] | None = None,
         *,
-        enterprise_id: str = "dev-enterprise",
+        enterprise_id: str,
         job_id: str | None = None,
         command: dict[str, Any] | None = None,
         workspace_root: Path | None = None,
@@ -184,7 +184,7 @@ class LangGraphAgentService(AgentService):
         thread_id: str,
         value: Any,
         *,
-        enterprise_id: str = "dev-enterprise",
+        enterprise_id: str,
         job_id: str | None = None,
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
