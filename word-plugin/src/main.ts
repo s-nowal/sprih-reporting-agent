@@ -4,18 +4,10 @@ import App from './App.vue'
 import { i18n } from './i18n'
 import router from './router'
 
-window.Office.onReady(async () => {
+window.Office.onReady(() => {
   const app = createApp(App)
-  const fullPath = Office.context.document.url;
 
-  function getFileDirectory(fullPath) {
-    if (!fullPath) return null;
-    const lastSlash = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf('\\'));
-    return fullPath.substring(0, lastSlash);
-  }
-  
-  const directory = getFileDirectory(Office.context.document.url);
-
+  // Debounce ResizeObserver callbacks — older Office hosts crash on tight loops.
   const debounce = (fn: (...args: any[]) => void, delay?: number) => {
     let timer: number | null = null
     return function (this: unknown, ...args: any[]) {
