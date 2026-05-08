@@ -180,8 +180,10 @@ async def stream_run(
         # Mirror issues should not break the agent run — log and continue.
         logger.warning("Mirror sync_in failed for thread %s: %s", thread_id, e)
 
-    # --- Checkout workspace (isolated temp dir) ------------------------------
-    temp_workspace = await workspace_service.checkout(
+    # --- Resolve persistent workspace prefix --------------------------------
+    # The agent now writes directly to storage via S3Backend, so there is no
+    # checkout/commit cycle. The prefix scopes every file op to this thread.
+    workspace_prefix = workspace_service.workspace_prefix(
         enterprise_id=enterprise.enterprise_id,
         thread_id=thread_id,
     )
@@ -204,7 +206,7 @@ async def stream_run(
             enterprise_id=enterprise.enterprise_id,
             job_id=job_id,
             command=command,
-            workspace_root=temp_workspace,
+            workspace_prefix=workspace_prefix,
         ):
             last_state = state
             messages = _serialize_messages(state.get("messages", []))
@@ -223,14 +225,9 @@ async def stream_run(
         _runs[run_id]["status"] = "success"
         _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
 
-        # --- Commit workspace to S3 ------------------------------------------
-        await workspace_service.commit(
-            enterprise_id=enterprise.enterprise_id,
-            thread_id=thread_id,
-            temp_dir=temp_workspace,
-        )
-
         # --- Push agent writes back to the mirror (no-op if not connected) --
+        # The agent's writes already landed in storage live (no commit step
+        # needed) so sync_out can run as soon as streaming completes.
         try:
             if mirror_provider is not None:
                 await mirror_provider.sync_out(
@@ -254,10 +251,6 @@ async def stream_run(
             "event": "error",
             "data": json.dumps({"error": type(e).__name__, "message": str(e)}),
         }
-
-    finally:
-        # --- Always clean up temp workspace ----------------------------------
-        await workspace_service.cleanup(temp_workspace)
 
     # --- End event -----------------------------------------------------------
     yield {"event": "end", "data": "null"}

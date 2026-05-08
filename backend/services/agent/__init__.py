@@ -3,7 +3,8 @@
 Sub-modules:
 - base, langgraph_service: AgentService interface and LangGraph implementation (THE SWAP POINT)
 - thread: Agent Protocol thread CRUD (create, get, search, update, delete)
-- workspace: temp workspace checkout/commit lifecycle for agent runs
+- workspace: storage key prefix helper for per-thread workspaces
+- s3_backend: deepagents BackendProtocol implementation against an S3-style store
 
 Import the execution interface from here:
 

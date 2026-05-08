@@ -5,7 +5,7 @@ The Reporting Agent (``create_deep_agent``) orchestrates:
 - Research subagent (web search + crawl via Tavily)
 - File system tools (read, write, ls, glob on workspace)
 - Human-in-the-loop interrupts (``request_user_input``)
-- Workspace checkout/commit lifecycle
+- Direct writes to storage via ``S3Backend`` (no temp-dir round-trip)
 
 This test simulates the frontend SDK call sequence for a reporting task.
 
@@ -15,12 +15,11 @@ Requires:
 
 Flow tested:
   1. GET  /info                          → verify default is reporting-agent
-  2. GET  /assistants/reporting-agent     → verify assistant exists
-  3. POST /threads                        → create conversation
-  4. POST /threads/{id}/runs/stream       → agent execution (SSE)
-  5. Verify SSE events: metadata, values (with messages), end
-  6. GET  /threads/{id}/state             → verify thread state updated
-  7. Verify workspace committed to S3 (files exist in storage)
+  2. POST /threads                        → create conversation
+  3. POST /threads/{id}/runs/stream       → agent execution (SSE)
+  4. Verify SSE events: metadata, values (with messages), end
+  5. GET  /threads/{id}/state             → verify thread state updated
+  6. Verify agent writes landed in S3 storage directly
 """
 
 import os
@@ -36,8 +35,8 @@ class TestReportingAgentFlow:
         """Walk through a single-turn reporting agent conversation.
 
         Sends a simple ESG question to the reporting agent and verifies
-        the full pipeline: workspace checkout → agent execution → workspace
-        commit → SSE streaming.
+        the full pipeline: agent execution streaming files directly to S3
+        via S3Backend, with SSE events flowing to the client.
 
         Steps match the frontend's useChat hook and page.tsx initialization.
         """
@@ -48,21 +47,14 @@ class TestReportingAgentFlow:
         info = resp.json()
         assert info["default_assistant"] == "reporting-agent"
 
-        # --- Step 2: GET /assistants/reporting-agent — assistant exists -------
-        resp = client.get("/assistants/reporting-agent")
-        assert resp.status_code == 200
-        assistant = resp.json()
-        assert assistant["assistant_id"] == "reporting-agent"
-        assert assistant["graph_id"] == "reporting-agent"
-
-        # --- Step 3: POST /threads — create conversation ---------------------
+        # --- Step 2: POST /threads — create conversation ---------------------
         resp = client.post("/threads", json={}, headers=auth_headers)
         assert resp.status_code == 201
         thread = resp.json()
         thread_id = thread["thread_id"]
         assert thread["status"] == "idle"
 
-        # --- Step 4: POST /threads/{id}/runs/stream — agent execution --------
+        # --- Step 3: POST /threads/{id}/runs/stream — agent execution --------
         resp = client.post(
             f"/threads/{thread_id}/runs/stream",
             json={
@@ -86,7 +78,7 @@ class TestReportingAgentFlow:
             f"Stream returned {resp.status_code}: {resp.text[:500]}"
         )
 
-        # --- Step 5: Verify SSE event structure ------------------------------
+        # --- Step 4: Verify SSE event structure ------------------------------
         content_type = resp.headers.get("content-type", "")
         assert "text/event-stream" in content_type
 
@@ -137,7 +129,7 @@ class TestReportingAgentFlow:
         # End event
         assert events[-1]["event"] == "end"
 
-        # --- Step 6: GET /threads/{id}/state — verify state updated ----------
+        # --- Step 5: GET /threads/{id}/state — verify state updated ----------
         resp = client.get(
             f"/threads/{thread_id}/state",
             headers=auth_headers,
@@ -150,7 +142,7 @@ class TestReportingAgentFlow:
             "Thread state should have at least the human message and AI response"
         )
 
-        # --- Step 7: GET /threads/{id}/runs/{run_id} — verify run status -----
+        # --- Step 6: GET /threads/{id}/runs/{run_id} — verify run status -----
         resp = client.get(
             f"/threads/{thread_id}/runs/{run_id}",
             headers=auth_headers,
@@ -161,10 +153,9 @@ class TestReportingAgentFlow:
         assert run["thread_id"] == thread_id
 
     def test_workspace_committed_to_storage(self, client, auth_headers):
-        """Verify that the workspace checkout/commit lifecycle works.
+        """Verify that agent writes land directly in S3-backed storage.
 
-        After an agent run, the workspace/ and output/ directories should
-        be synced to persistent storage under the enterprise/thread path.
+        With S3Backend, file writes are persisted live (no commit step).
         This test sends a message that triggers a file write (the reporting
         agent writes to workspace/ as part of its workflow) and checks that
         the workspace directory exists in storage after the run completes.
@@ -202,8 +193,8 @@ class TestReportingAgentFlow:
             f"Agent errored: {error_events}"
         )
 
-        # --- Verify workspace was committed to S3 ----------------------------
-        # The workspace service commits to:
+        # --- Verify agent writes landed in S3-backed storage -----------------
+        # S3Backend writes live to:
         #   data/s3/enterprise/{eid}/workspaces/{thread_id}/workspace/
         from backend.config import settings
 
@@ -212,9 +203,9 @@ class TestReportingAgentFlow:
             f"enterprise/{enterprise_id}/workspaces/{thread_id}/workspace"
         )
 
-        # The workspace directory should exist in storage after commit
+        # The workspace directory should exist in storage after the run
         assert workspace_s3_dir.exists(), (
-            f"Workspace not committed to S3. Expected dir: {workspace_s3_dir}"
+            f"Agent writes did not land in S3. Expected dir: {workspace_s3_dir}"
         )
 
         # Check that the agent actually wrote the test file

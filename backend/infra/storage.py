@@ -1,15 +1,21 @@
 """Local filesystem storage adapter (simulates S3 for dev/sandbox).
 
+The adapter exposes an S3-style object API (``read``, ``write``,
+``exists``, ``list_objects``) so callers can target it identically against
+a future ``BotoS3Storage``. ``abs_path`` is a LocalStorage-only escape
+hatch and will not exist on the real S3 implementation.
+
 To add a new backend:
 1. Create ``infra/<backend>_storage.py`` with the adapter class.
 2. Add a branch in ``get_storage()`` and set ``SPRIH_STORAGE_BACKEND=<backend>`` in .env.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 
 class LocalStorage:
-    """Read/write files relative to a root directory."""
+    """Read/write objects under a local-filesystem-backed S3 mock."""
 
     def __init__(self, root: str) -> None:
         self.root = Path(root).resolve()
@@ -41,8 +47,63 @@ class LocalStorage:
         """Check whether ``rel_path`` exists under root."""
         return self._abs(rel_path).exists()
 
+    def list_objects(self, prefix: str) -> list[dict]:
+        """List every object (recursive) whose key starts with ``prefix``.
+
+        Models S3 ``ListObjectsV2`` semantics on top of the local filesystem:
+        directories themselves are not returned, only file objects.
+
+        Args:
+            prefix: Storage-relative key prefix (no leading ``/``). Trailing
+                slashes are tolerated and treated as directory boundaries.
+
+        Returns:
+            List of dicts with keys:
+              - ``key``: full storage key (storage-relative path).
+              - ``size``: object size in bytes.
+              - ``modified_at``: filesystem mtime as a local-time ISO 8601 string.
+
+            Returns ``[]`` if the prefix matches no existing objects.
+        """
+        base = self._abs(prefix)
+        if not base.exists():
+            return []
+
+        # If the prefix names a single file, return just that one object.
+        if base.is_file():
+            stat = base.stat()
+            key = base.relative_to(self.root).as_posix()
+            return [{
+                "key": key,
+                "size": int(stat.st_size),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            }]
+
+        # Otherwise walk the subtree.
+        results: list[dict] = []
+        for fp in base.rglob("*"):
+            try:
+                if not fp.is_file():
+                    continue
+                stat = fp.stat()
+            except OSError:
+                continue
+            results.append({
+                "key": fp.relative_to(self.root).as_posix(),
+                "size": int(stat.st_size),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+        results.sort(key=lambda o: o["key"])
+        return results
+
     def abs_path(self, rel_path: str) -> str:
-        """Return the absolute filesystem path for a storage-relative path."""
+        """Return the absolute filesystem path for a storage-relative path.
+
+        LocalStorage-only escape hatch used by the mirror service. Will not
+        exist on the future ``BotoS3Storage`` implementation; callers that
+        need a future-proof path should use ``list_objects`` + ``read``
+        instead.
+        """
         return str(self._abs(rel_path))
 
 

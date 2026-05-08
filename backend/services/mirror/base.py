@@ -25,6 +25,7 @@ from backend.config import settings
 from backend.infra.registry import get_db, get_storage
 from backend.models.mirror_credentials import MirrorCredentials
 from backend.models.thread import Thread
+from backend.services.agent.workspace import workspace_prefix as _s3_workspace_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +69,6 @@ def generate_thread_title() -> str:
 # ---------------------------------------------------------------------------
 # S3-side helpers
 # ---------------------------------------------------------------------------
-
-
-def _s3_workspace_prefix(enterprise_id: str, thread_id: str) -> str:
-    """Mirror of ``workspace_service._s3_workspace_prefix``.
-
-    Kept inline (rather than imported) so the mirror package has no
-    dependency on the workspace service. The two must stay in sync; if
-    one moves, update the other.
-    """
-    return f"enterprise/{enterprise_id}/workspaces/{thread_id}"
 
 
 def _s3_subdir_root(enterprise_id: str, thread_id: str, subdir: str) -> Path:
@@ -496,6 +487,11 @@ class MirrorProvider(ABC):
 
                 for src in sorted(local_root.rglob("*")):
                     if not src.is_file():
+                        continue
+                    # Skip ``.keep`` placeholders dropped by the file
+                    # manager scaffolder — they exist only to make empty
+                    # folders discoverable in S3 and have no value on Drive.
+                    if src.name == ".keep":
                         continue
                     rel = src.relative_to(local_root).as_posix()
                     if cutoff is not None:
