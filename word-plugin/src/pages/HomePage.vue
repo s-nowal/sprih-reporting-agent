@@ -33,71 +33,19 @@
             <History :size="13" />
           </button>
           <button
-            class="flex h-6 w-6 items-center justify-center rounded transition-colors disabled:opacity-40"
-            :class="
-              viewMode === 'newChat'
-                ? 'bg-accent/15 text-accent'
-                : 'text-secondary hover:bg-hover hover:text-main'
-            "
-            :title="viewMode === 'newChat' ? 'Cancel new chat' : 'New chat'"
+            class="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main disabled:opacity-40"
+            title="New chat"
             :disabled="streaming"
-            @click="toggleView('newChat')"
+            @click="newChat"
           >
             <Plus :size="13" />
           </button>
         </div>
       </div>
 
-      <!-- New-chat inline panel -->
-      <div
-        v-if="viewMode === 'newChat'"
-        class="flex flex-1 flex-col gap-2 overflow-hidden rounded-sm border border-border bg-bg-tertiary p-3"
-      >
-        <span
-          class="text-[10px] font-semibold uppercase tracking-widest text-tertiary"
-        >
-          Start a new chat
-        </span>
-        <label class="flex flex-col gap-1">
-          <span class="text-[11px] text-secondary">Thread title</span>
-          <input
-            ref="titleInput"
-            v-model="newChatTitle"
-            type="text"
-            placeholder="e.g. Q3 ESG report"
-            class="rounded border border-border bg-bg px-2 py-1.5 text-[12px] text-main placeholder-tertiary focus:border-accent/40 focus:outline-none"
-            @keydown.enter.prevent="createNewChat"
-            @keydown.escape.prevent="cancelNewChat"
-          />
-        </label>
-        <p class="text-[10px] leading-relaxed text-tertiary">
-          Creates an empty thread with this title and the standard
-          <code>input/</code> + <code>output/</code> folders ready for
-          uploads.
-        </p>
-        <div v-if="newChatError" class="text-[11px] text-danger">
-          {{ newChatError }}
-        </div>
-        <div class="mt-auto flex justify-end gap-2">
-          <button
-            class="rounded px-3 py-1 text-[11px] text-secondary transition-colors hover:bg-hover hover:text-main"
-            @click="cancelNewChat"
-          >
-            Cancel
-          </button>
-          <button
-            class="rounded bg-accent px-3 py-1 text-[11px] font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="!newChatTitle.trim() || creatingThread"
-            @click="createNewChat"
-          >
-            {{ creatingThread ? 'Creating…' : 'Create' }}
-          </button>
-        </div>
-      </div>
-
       <!-- History inline panel -->
       <div
-        v-else-if="viewMode === 'history'"
+        v-if="viewMode === 'history'"
         class="flex flex-1 flex-col gap-2 overflow-hidden rounded-sm border border-border bg-bg-tertiary p-2"
       >
         <span
@@ -510,7 +458,7 @@ import { htmlToMarkdown, markdownToHtml } from '@/utils/mdFormatter'
 const THREAD_KEY = 'sprih.threadId'
 const TITLE_KEY = 'sprih.threadTitle'
 
-type ViewMode = 'chat' | 'newChat' | 'history'
+type ViewMode = 'chat' | 'history'
 const THINK_TAG = '<think>'
 const THINK_TAG_END = '</think>'
 
@@ -533,14 +481,8 @@ const inputTextarea = ref<HTMLTextAreaElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 
-// View-mode state — header buttons toggle between three full-pane views.
+// View-mode state — header History button toggles between chat + history.
 const viewMode = ref<ViewMode>('chat')
-
-// New-chat panel state.
-const newChatTitle = ref('')
-const newChatError = ref<string | null>(null)
-const creatingThread = ref(false)
-const titleInput = ref<HTMLInputElement | null>(null)
 
 // History panel state.
 const historyThreads = ref<ThreadSummary[]>([])
@@ -548,7 +490,6 @@ const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
 
 const headerSubtitle = computed(() => {
-  if (viewMode.value === 'newChat') return 'new conversation'
   if (viewMode.value === 'history') return 'select a thread'
   if (threadTitle.value) return threadTitle.value
   if (threadId.value) return `thread ${threadId.value.slice(0, 8)}…`
@@ -880,49 +821,26 @@ function resetChatState() {
 
 // Header-button handler — flip into the requested view, or back to chat
 // if the same button is pressed again.
-function toggleView(target: 'newChat' | 'history') {
+function toggleView(target: 'history') {
   if (streaming.value) return
   if (viewMode.value === target) {
     viewMode.value = 'chat'
     return
   }
   viewMode.value = target
-  if (target === 'newChat') {
-    newChatTitle.value = ''
-    newChatError.value = null
-    nextTick(() => titleInput.value?.focus())
-  } else if (target === 'history') {
-    refreshHistory()
-  }
+  if (target === 'history') refreshHistory()
 }
 
-async function createNewChat() {
-  const title = newChatTitle.value.trim()
-  if (!title || creatingThread.value) return
-  creatingThread.value = true
-  newChatError.value = null
-  try {
-    const t = await createThread({ title, source: 'word-plugin' })
-    // Activate the new thread in chat view.
-    threadId.value = t.thread_id
-    threadTitle.value = title
-    localStorage.setItem(THREAD_KEY, t.thread_id)
-    localStorage.setItem(TITLE_KEY, title)
-    resetChatState()
-    newChatTitle.value = ''
-    viewMode.value = 'chat'
-  } catch (e) {
-    newChatError.value =
-      e instanceof Error ? e.message : `Create failed: ${String(e)}`
-  } finally {
-    creatingThread.value = false
-  }
-}
-
-function cancelNewChat() {
-  if (creatingThread.value) return
-  newChatTitle.value = ''
-  newChatError.value = null
+// "+" button — drop the current thread and let the next send create a
+// fresh one. No title prompt; the title is auto-derived from the first
+// message and can be edited later from the history panel.
+function newChat() {
+  if (streaming.value) return
+  localStorage.removeItem(THREAD_KEY)
+  localStorage.removeItem(TITLE_KEY)
+  threadId.value = null
+  threadTitle.value = null
+  resetChatState()
   viewMode.value = 'chat'
 }
 
