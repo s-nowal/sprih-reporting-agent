@@ -77,6 +77,9 @@ class GoogleDriveMirrorProvider(MirrorProvider):
     ) -> None:
         self._get_client().update_file_content(file_id, content, mime_type)
 
+    def get_folder_metadata(self, folder_id: str) -> dict[str, Any] | None:
+        return self._get_client().get_file_metadata(folder_id)
+
     def is_native_format(self, mime_type: str) -> bool:
         # Native Google Docs / Sheets / Slides aren't real binary files —
         # downloading them returns nothing useful and uploading replacements

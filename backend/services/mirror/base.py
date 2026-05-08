@@ -188,6 +188,30 @@ async def _set_mapping(
         await session.commit()
 
 
+async def _delete_mapping(thread_id: str) -> bool:
+    """Remove the mirror mapping for a thread, if any.
+
+    Used by the unlink endpoint and by the link endpoint when re-linking
+    a broken folder. Does NOT touch the provider — the Drive folder is
+    intentionally orphaned (user can clean up manually if they want).
+
+    Args:
+        thread_id: Thread id.
+
+    Returns:
+        ``True`` if a mapping row was removed, ``False`` if there was
+        nothing to remove.
+    """
+    db = get_db()
+    async with db() as session:
+        row = await session.get(ThreadMirrorMapping, thread_id)
+        if row is None:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
 async def _set_last_synced(thread_id: str, when: datetime) -> None:
     """Update ``last_synced_at`` on the mirror mapping row.
 
@@ -315,6 +339,23 @@ class MirrorProvider(ABC):
         """
 
     @abstractmethod
+    def get_folder_metadata(self, folder_id: str) -> dict[str, Any] | None:
+        """Return folder metadata by id, or ``None`` if missing/inaccessible.
+
+        Used to detect a broken link — when our mapping points at a
+        folder that has been deleted or trashed on the provider side.
+        Implementations should treat 404 and ``trashed=True`` (or the
+        provider equivalent) as ``None``.
+
+        Args:
+            folder_id: Provider-side folder id.
+
+        Returns:
+            A dict with at least ``id`` and ``name`` if reachable;
+            otherwise ``None``.
+        """
+
+    @abstractmethod
     def is_native_format(self, mime_type: str) -> bool:
         """Whether a MIME type is a provider-native, non-binary format we skip.
 
@@ -343,37 +384,48 @@ class MirrorProvider(ABC):
     # -- Concrete shared orchestration -------------------------------------
 
     async def setup_thread_folder(
-        self, enterprise_id: str, thread_id: str, agent_name: str
+        self,
+        enterprise_id: str,
+        thread_id: str,
+        agent_name: str,
+        folder_name: str | None = None,
     ) -> Thread | None:
         """Provision the per-thread mirror folder structure if missing.
 
         Creates::
 
-            <parent>/{agent_name}/{thread_title}/
+            <parent>/{agent_name}/{folder_name}/
                 input/
                 output/
                 ...mirrored subdirs from settings.drive_mirror_subdirs...
 
-        Idempotent — subsequent calls return the existing thread row.
+        Idempotent — subsequent calls return the existing thread row
+        without touching the provider.
 
         Args:
             enterprise_id: Tenant id (unused for now; reserved for future
                 multi-provider routing).
             thread_id: Thread id. The thread row must already exist.
             agent_name: Graph name (becomes a subfolder under the parent).
+            folder_name: Display name for the per-thread folder. ``None``
+                falls back to a generated codename
+                (``"saffron-meadow-274"`` style) — used by callers that
+                don't have a user-supplied name. The mirror REST API
+                always supplies one.
 
         Returns:
-            The ``Thread`` row with its mirror fields set, or ``None`` if
-            no parent folder has been registered yet (in which case sync
-            is a no-op) or the thread row is missing.
+            The ``Thread`` row if the linkage is in place (existing or
+            newly created), or ``None`` if no parent folder has been
+            registered yet or the thread row is missing.
         """
         if not self._creds.parent_folder_id:
             return None
 
         thread = await _get_thread(thread_id)
         if thread is None:
-            # Run handler always creates the thread row before invoking us;
-            # if it's missing we silently skip rather than create one here.
+            # Caller is expected to have created the thread row before
+            # invoking us; if it's missing we silently skip rather than
+            # create one here.
             logger.warning("setup_thread_folder: no thread row for %s", thread_id)
             return None
 
@@ -381,7 +433,7 @@ class MirrorProvider(ABC):
         if existing is not None:
             return thread
 
-        title = generate_thread_title()
+        title = folder_name or generate_thread_title()
         parent_id = self._creds.parent_folder_id
         mirror_subdirs = _mirror_subdirs_for(agent_name)
 

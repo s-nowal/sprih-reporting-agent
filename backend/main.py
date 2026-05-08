@@ -10,6 +10,7 @@ from backend.config import settings
 from backend.routers import (
     files,
     google_auth,
+    mirror,
     runs,
     sources,
     threads,
@@ -78,6 +79,7 @@ app.include_router(threads.router)
 app.include_router(runs.router)
 app.include_router(sources.router)
 app.include_router(files.router)
+app.include_router(mirror.router)
 app.include_router(google_auth.router)
 
 

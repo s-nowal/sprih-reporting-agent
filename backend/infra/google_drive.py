@@ -186,6 +186,41 @@ class GoogleDriveClient:
             supportsAllDrives=True,
         ).execute()
 
+    def get_file_metadata(self, file_id: str) -> dict[str, Any] | None:
+        """Fetch a file or folder's metadata by id, or ``None`` if missing.
+
+        ``None`` is returned both when the API responds 404 (item never
+        existed or has been hard-deleted) and when the item is in the
+        Drive trash (``trashed=True``). Callers use this to detect a
+        broken link from our DB mapping to the provider folder.
+
+        Args:
+            file_id: Drive ID of the item.
+
+        Returns:
+            A dict with at least ``id``, ``name``, ``mimeType``,
+            ``trashed`` if the item is reachable; otherwise ``None``.
+        """
+        from googleapiclient.errors import HttpError
+
+        try:
+            meta = (
+                self._service.files()
+                .get(
+                    fileId=file_id,
+                    fields="id, name, mimeType, trashed",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as e:
+            if e.resp.status == 404:
+                return None
+            raise
+        if meta.get("trashed"):
+            return None
+        return meta
+
     # -- File listing -------------------------------------------------------
 
     def list_files_recursive(

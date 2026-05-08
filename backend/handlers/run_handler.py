@@ -160,17 +160,14 @@ async def stream_run(
     except Exception as e:
         logger.warning("Failed to create job: %s", e)
 
-    # --- Provision mirror folder + pull user edits before checkout ----------
-    # No-ops if the enterprise hasn't connected any mirror provider.
+    # --- Pull user edits from the mirror before the run --------------------
+    # Mirror linkage is opt-in per thread now (see PUT /threads/{tid}/mirror).
+    # ``sync_in`` is a no-op when no mapping exists, so this stays cheap on
+    # threads that never linked a Drive folder.
     mirror_provider = None
     try:
         mirror_provider = await mirror.get_provider(enterprise.enterprise_id)
         if mirror_provider is not None:
-            await mirror_provider.setup_thread_folder(
-                enterprise_id=enterprise.enterprise_id,
-                thread_id=thread_id,
-                agent_name=data.assistant_id,
-            )
             await mirror_provider.sync_in(
                 enterprise_id=enterprise.enterprise_id,
                 thread_id=thread_id,
