@@ -19,36 +19,6 @@ def _to_response(t: dict) -> ThreadResponse:
     return ThreadResponse(**t)
 
 
-async def _ensure_thread(thread_id: str, enterprise: EnterpriseContext) -> dict:
-    """Return the thread if it exists and is owned by this enterprise; create it if not.
-
-    Used by history/state/stream endpoints so a stale thread ID (e.g. from the
-    frontend's URL after a server restart) is silently recreated rather than
-    returning a 404 that the UI can't recover from on its own.
-
-    Args:
-        thread_id: UUID of the thread to look up or create.
-        enterprise: Caller's enterprise context from JWT.
-
-    Returns:
-        The existing or newly created thread dict.
-
-    Raises:
-        HTTPException 404 if the thread exists but belongs to another tenant.
-    """
-    t = await thread_service.get(thread_id)
-    if t is None:
-        metadata = {"enterprise_id": enterprise.enterprise_id}
-        t = await thread_service.create(thread_id, enterprise.enterprise_id, metadata)
-        # Drop ``.keep`` placeholders so the workspace folder layout is
-        # discoverable from the file manager UI even before the user
-        # uploads anything.
-        await file_handler.scaffold_folders(enterprise.enterprise_id, thread_id)
-    elif t["metadata"].get("enterprise_id") != enterprise.enterprise_id:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    return t
-
-
 async def _assert_ownership(thread_id: str, enterprise: EnterpriseContext) -> dict:
     """Fetch a thread and verify it belongs to the caller's enterprise.
 

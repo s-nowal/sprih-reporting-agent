@@ -50,9 +50,11 @@ async def stream_run(
     inside the async generator where FastAPI can't catch HTTPException.
     """
     # Validate thread exists and belongs to this enterprise BEFORE streaming.
-    # HTTPException raised here is handled normally by FastAPI.
-    from backend.handlers.thread_handler import _ensure_thread
-    await _ensure_thread(thread_id, enterprise)
+    # HTTPException raised here is handled normally by FastAPI; 404 if the
+    # thread is missing (the UI's hydrate handler will then clear the
+    # stale id from localStorage).
+    from backend.handlers.thread_handler import _assert_ownership
+    await _assert_ownership(thread_id, enterprise)
 
     run_id = str(uuid4())
 

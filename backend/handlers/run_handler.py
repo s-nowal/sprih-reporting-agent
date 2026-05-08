@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from backend.handlers.thread_handler import _assert_ownership, _ensure_thread
+from backend.handlers.thread_handler import _assert_ownership
 from backend.schemas.runs import RunCreate, RunResponse
 from backend.security.auth import EnterpriseContext
 from backend.services import job as job_service
@@ -130,7 +130,7 @@ async def stream_run(
         SSE event dicts: ``metadata`` → N × ``values`` → ``end``
         (or ``error`` → ``end`` on failure).
     """
-    await _ensure_thread(thread_id, enterprise)
+    await _assert_ownership(thread_id, enterprise)
     now = datetime.now(timezone.utc)
 
     _runs[run_id] = {
