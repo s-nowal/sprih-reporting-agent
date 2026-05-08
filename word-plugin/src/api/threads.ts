@@ -48,6 +48,21 @@ export async function getThreadState(threadId: string): Promise<ThreadState> {
   return apiJson<ThreadState>(`/threads/${threadId}/state`)
 }
 
+/** Merge ``metadata`` into the thread row's metadata column.
+ *
+ * The backend update is a shallow merge, so passing ``{title: 'X'}``
+ * leaves other keys (``enterprise_id``, ``source``, …) intact.
+ */
+export async function updateThreadMetadata(
+  threadId: string,
+  metadata: Record<string, unknown>,
+): Promise<ThreadResponse> {
+  return apiJson<ThreadResponse>(`/threads/${threadId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ metadata }),
+  })
+}
+
 export interface ThreadSummary {
   thread_id: string
   title: string | null

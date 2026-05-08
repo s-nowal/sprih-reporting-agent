@@ -450,6 +450,7 @@ import {
   createThread,
   getThreadState,
   listThreads,
+  updateThreadMetadata,
   type AgentMessage,
   type ThreadSummary,
 } from '@/api/threads'
@@ -691,6 +692,18 @@ async function onSubmit() {
         error.value = `${evt.data.error}: ${evt.data.message}`
       }
     }
+    // Auto-title: first time we successfully stream against a thread
+    // with no title set, derive one from the typed prompt and PATCH the
+    // metadata so the history list shows something recognisable. Fire-
+    // and-forget — a network blip on PATCH isn't worth surfacing.
+    if (!threadTitle.value && typed) {
+      const auto = deriveAutoTitle(typed)
+      threadTitle.value = auto
+      localStorage.setItem(TITLE_KEY, auto)
+      void updateThreadMetadata(tid, { title: auto }).catch((e) => {
+        console.warn('Auto-title PATCH failed:', e)
+      })
+    }
   } catch (e) {
     if ((e as { name?: string })?.name === 'AbortError') {
       // user-initiated stop, no error UI
@@ -701,6 +714,19 @@ async function onSubmit() {
     streaming.value = false
     abortController.value = null
   }
+}
+
+const AUTO_TITLE_MAX = 60
+
+// Derive a thread title from a user message: collapse whitespace and
+// truncate to 60 chars with an ellipsis. Mirrors the server-side
+// fallback in ``api/threads.ts:deriveTitle`` so both views agree on
+// what an auto-title looks like.
+function deriveAutoTitle(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim()
+  return collapsed.length > AUTO_TITLE_MAX
+    ? collapsed.slice(0, AUTO_TITLE_MAX - 1) + '…'
+    : collapsed
 }
 
 // Append a "reference file" suffix to the user's typed text so the agent
