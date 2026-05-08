@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
+from backend.handlers import file_handler
 from backend.schemas.threads import (
     ThreadCreate,
     ThreadResponse,
@@ -39,6 +40,10 @@ async def _ensure_thread(thread_id: str, enterprise: EnterpriseContext) -> dict:
     if t is None:
         metadata = {"enterprise_id": enterprise.enterprise_id}
         t = await thread_service.create(thread_id, enterprise.enterprise_id, metadata)
+        # Drop ``.keep`` placeholders so the workspace folder layout is
+        # discoverable from the file manager UI even before the user
+        # uploads anything.
+        await file_handler.scaffold_folders(enterprise.enterprise_id, thread_id)
     elif t["metadata"].get("enterprise_id") != enterprise.enterprise_id:
         raise HTTPException(status_code=404, detail="Thread not found")
     return t
@@ -92,6 +97,9 @@ async def create_thread(
     metadata["enterprise_id"] = enterprise.enterprise_id
 
     t = await thread_service.create(thread_id, enterprise.enterprise_id, metadata)
+    # Scaffold the workspace folder layout so the file manager UI can show
+    # the empty thread immediately after creation.
+    await file_handler.scaffold_folders(enterprise.enterprise_id, thread_id)
     return _to_response(t)
 
 

@@ -1,3 +1,183 @@
+// ── Markdown → HTML renderer ─────────────────────────────────────────────
+// Tiny CommonMark-ish subset, sufficient for what an LLM emits in chat:
+// headings, bold/italic/code/links, fenced code, lists, tables, blockquotes,
+// rules. Output is plugged in via v-html, so all user-supplied substrings
+// MUST flow through escapeHtml() before concatenation.
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function renderInline(text: string): string {
+  // Ordered longest-match first: *** > ** > *, ___ > __ > _.
+  const pattern =
+    /\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|___(.+?)___|__(.+?)__|_(.+?)_|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g
+  let result = ''
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex)
+      result += escapeHtml(text.slice(lastIndex, match.index))
+    const [, bi1, b1, i1, bi2, b2, i2, code, linkText, linkHref] = match
+    if (bi1 !== undefined) result += `<strong><em>${escapeHtml(bi1)}</em></strong>`
+    else if (b1 !== undefined) result += `<strong>${escapeHtml(b1)}</strong>`
+    else if (i1 !== undefined) result += `<em>${escapeHtml(i1)}</em>`
+    else if (bi2 !== undefined) result += `<strong><em>${escapeHtml(bi2)}</em></strong>`
+    else if (b2 !== undefined) result += `<strong>${escapeHtml(b2)}</strong>`
+    else if (i2 !== undefined) result += `<em>${escapeHtml(i2)}</em>`
+    else if (code !== undefined) result += `<code>${escapeHtml(code)}</code>`
+    else if (linkText !== undefined)
+      result += `<a href="${escapeHtml(linkHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(linkText)}</a>`
+    lastIndex = pattern.lastIndex
+  }
+  if (lastIndex < text.length) result += escapeHtml(text.slice(lastIndex))
+  return result
+}
+
+function parseTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+export function markdownToHtml(markdown: string): string {
+  const lines = markdown.trim().split('\n')
+  const parts: string[] = []
+  let i = 0
+  let openList: '' | 'ul' | 'ol' = ''
+
+  const closeList = () => {
+    if (openList) {
+      parts.push(`</${openList}>`)
+      openList = ''
+    }
+  }
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Fenced code block
+    if (line.trim().startsWith('```')) {
+      closeList()
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        codeLines.push(escapeHtml(lines[i]))
+        i++
+      }
+      i++
+      parts.push(`<pre><code>${codeLines.join('\n')}</code></pre>`)
+      continue
+    }
+
+    // Heading
+    const hm = line.match(/^(#{1,6})\s+(.+?)(?:\s+#+)?$/)
+    if (hm) {
+      closeList()
+      const tag = `h${hm[1].length}`
+      parts.push(`<${tag}>${renderInline(hm[2])}</${tag}>`)
+      i++
+      continue
+    }
+
+    // Blockquote
+    if (line.trimStart().startsWith('>')) {
+      closeList()
+      parts.push(
+        `<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`,
+      )
+      i++
+      continue
+    }
+
+    // Bullet list
+    const bm = line.match(/^(\s*)[-*+]\s+(.+)/)
+    if (bm) {
+      if (openList !== 'ul') {
+        closeList()
+        parts.push('<ul>')
+        openList = 'ul'
+      }
+      parts.push(`<li>${renderInline(bm[2])}</li>`)
+      i++
+      continue
+    }
+
+    // Numbered list
+    const nm = line.match(/^(\s*)\d+\.\s+(.+)/)
+    if (nm) {
+      if (openList !== 'ol') {
+        closeList()
+        parts.push('<ol>')
+        openList = 'ol'
+      }
+      parts.push(`<li>${renderInline(nm[2])}</li>`)
+      i++
+      continue
+    }
+
+    // Table (header row followed by | --- | --- | separator)
+    if (line.trim().startsWith('|')) {
+      const nextLine = lines[i + 1]?.trim() ?? ''
+      if (nextLine.match(/^\|[-:\s|]+\|/)) {
+        closeList()
+        const headers = parseTableRow(line)
+        i += 2
+        const rows: string[][] = []
+        while (i < lines.length && lines[i].trim().startsWith('|')) {
+          rows.push(parseTableRow(lines[i]))
+          i++
+        }
+        const headerHtml = headers
+          .map((h) => `<th>${renderInline(h)}</th>`)
+          .join('')
+        const bodyHtml = rows
+          .map(
+            (row) =>
+              `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`,
+          )
+          .join('')
+        parts.push(
+          `<table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`,
+        )
+        continue
+      }
+    }
+
+    // Horizontal rule
+    if (/^[-*_]{3,}$/.test(line.trim())) {
+      closeList()
+      parts.push('<hr/>')
+      i++
+      continue
+    }
+
+    // Blank line
+    if (!line.trim()) {
+      closeList()
+      i++
+      continue
+    }
+
+    // Paragraph
+    closeList()
+    parts.push(`<p>${renderInline(line)}</p>`)
+    i++
+  }
+
+  closeList()
+  return parts.join('')
+}
+
+// ── HTML → Markdown converter ────────────────────────────────────────────
+
 export function htmlToMarkdown(html) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");

@@ -47,3 +47,60 @@ export async function createThread(
 export async function getThreadState(threadId: string): Promise<ThreadState> {
   return apiJson<ThreadState>(`/threads/${threadId}/state`)
 }
+
+export interface ThreadSummary {
+  thread_id: string
+  title: string | null
+  created_at: string
+  updated_at: string
+  metadata: Record<string, unknown>
+}
+
+/** Maximum length of an auto-derived title (from the first human message). */
+const AUTO_TITLE_MAX = 60
+
+/** Derive a display title for a thread.
+ *
+ * Priority: explicit ``metadata.title`` → first human message in
+ * ``values.messages`` (collapsed whitespace, truncated). Returns
+ * ``null`` if neither is available so the caller can show its own
+ * fallback (typically the thread id prefix).
+ */
+function deriveTitle(t: ThreadResponse): string | null {
+  const explicit = t.metadata?.title
+  if (typeof explicit === 'string' && explicit.trim()) return explicit
+  const messages = (t.values as { messages?: AgentMessage[] })?.messages
+  if (!messages?.length) return null
+  const firstHuman = messages.find((m) => m.type === 'human')
+  if (!firstHuman) return null
+  const raw =
+    typeof firstHuman.content === 'string'
+      ? firstHuman.content
+      : ''
+  const collapsed = raw.replace(/\s+/g, ' ').trim()
+  if (!collapsed) return null
+  return collapsed.length > AUTO_TITLE_MAX
+    ? collapsed.slice(0, AUTO_TITLE_MAX - 1) + '…'
+    : collapsed
+}
+
+/** List the caller's threads, most recently updated first.
+ *
+ * Uses ``POST /threads/search`` (the Agent Protocol shape — query
+ * params via JSON body). Display title falls back through
+ * ``metadata.title`` → first human message excerpt → ``null`` (UI
+ * shows the id prefix as a last resort).
+ */
+export async function listThreads(limit = 50): Promise<ThreadSummary[]> {
+  const raw = await apiJson<ThreadResponse[]>('/threads/search', {
+    method: 'POST',
+    body: JSON.stringify({ limit, offset: 0 }),
+  })
+  return raw.map((t) => ({
+    thread_id: t.thread_id,
+    title: deriveTitle(t),
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+    metadata: t.metadata,
+  }))
+}

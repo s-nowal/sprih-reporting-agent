@@ -8,8 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
 from backend.routers import (
-    artifacts,
-    assistants,
+    files,
     google_auth,
     runs,
     sources,
@@ -75,11 +74,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(assistants.router)
 app.include_router(threads.router)
 app.include_router(runs.router)
 app.include_router(sources.router)
-app.include_router(artifacts.router)
+app.include_router(files.router)
 app.include_router(google_auth.router)
 
 
