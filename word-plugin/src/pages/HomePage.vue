@@ -73,29 +73,188 @@
         </div>
         <ul v-else class="m-0 flex flex-col gap-1 overflow-y-auto p-0 list-none">
           <li v-for="t in historyThreads" :key="t.thread_id">
-            <button
-              class="flex w-full flex-col items-start gap-0.5 rounded border px-2 py-1.5 text-left transition-colors"
+            <div
+              class="group flex w-full items-center gap-1 rounded border px-2 py-1.5 transition-colors"
               :class="
                 t.thread_id === threadId
                   ? 'border-accent/40 bg-accent/5'
                   : 'border-border bg-bg-secondary hover:bg-hover'
               "
-              @click="loadThread(t)"
             >
-              <span
-                class="truncate text-[12px] font-medium text-main w-full"
-                :title="t.title ?? `thread ${t.thread_id.slice(0, 8)}…`"
+              <button
+                class="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
+                @click="loadThread(t)"
               >
-                {{ t.title ?? `thread ${t.thread_id.slice(0, 8)}…` }}
-              </span>
-              <span
-                class="text-[10px] uppercase tracking-wider text-tertiary"
+                <span
+                  class="truncate text-[12px] font-medium text-main w-full"
+                  :title="t.title ?? `thread ${t.thread_id.slice(0, 8)}…`"
+                >
+                  {{ t.title ?? `thread ${t.thread_id.slice(0, 8)}…` }}
+                </span>
+                <span
+                  class="text-[10px] uppercase tracking-wider text-tertiary"
+                >
+                  {{ formatRelativeTime(t.updated_at) }}
+                </span>
+              </button>
+              <button
+                class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-tertiary opacity-60 transition-colors hover:bg-hover hover:text-main hover:opacity-100"
+                title="Edit thread"
+                @click.stop="openEditThread(t)"
               >
-                {{ formatRelativeTime(t.updated_at) }}
-              </span>
-            </button>
+                <Pencil :size="11" />
+              </button>
+            </div>
           </li>
         </ul>
+      </div>
+
+      <!-- Edit thread panel -->
+      <div
+        v-else-if="viewMode === 'editThread' && editingThread"
+        class="flex flex-1 flex-col gap-3 overflow-y-auto rounded-sm border border-border bg-bg-tertiary p-3"
+      >
+        <div class="flex items-center gap-2">
+          <button
+            class="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main"
+            title="Back to history"
+            @click="closeEditThread"
+          >
+            <ArrowLeft :size="13" />
+          </button>
+          <span
+            class="text-[10px] font-semibold uppercase tracking-widest text-tertiary"
+          >
+            Edit thread
+          </span>
+        </div>
+
+        <!-- Title section -->
+        <section class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-tertiary">
+            Title
+          </span>
+          <div class="flex items-center gap-1">
+            <input
+              v-model="editTitle"
+              type="text"
+              :placeholder="`thread ${editingThread.thread_id.slice(0, 8)}…`"
+              class="flex-1 rounded border border-border bg-bg px-2 py-1.5 text-[12px] text-main placeholder-tertiary focus:border-accent/40 focus:outline-none"
+              @keydown.enter.prevent="saveTitle"
+            />
+            <button
+              class="rounded bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="!editTitle.trim() || savingTitle || editTitle === (editingThread.title ?? '')"
+              @click="saveTitle"
+            >
+              {{ savingTitle ? 'Saving…' : 'Save' }}
+            </button>
+          </div>
+        </section>
+
+        <!-- Drive folder section -->
+        <section class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-tertiary">
+            Drive folder
+          </span>
+
+          <div v-if="mirrorBusy" class="text-[11px] italic text-tertiary">
+            Loading…
+          </div>
+
+          <!-- Not linked -->
+          <div
+            v-else-if="mirrorStatus && !mirrorStatus.linked"
+            class="flex flex-col gap-1.5"
+          >
+            <p class="text-[10px] leading-relaxed text-tertiary">
+              No Drive folder linked. Files in this thread are stored only
+              in S3.
+            </p>
+            <div class="flex items-center gap-1">
+              <input
+                v-model="linkFolderName"
+                type="text"
+                placeholder="New Drive folder name"
+                class="flex-1 rounded border border-border bg-bg px-2 py-1.5 text-[12px] text-main placeholder-tertiary focus:border-accent/40 focus:outline-none"
+                @keydown.enter.prevent="linkFolder()"
+              />
+              <button
+                class="rounded bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+                :disabled="!linkFolderName.trim() || mirrorBusy"
+                @click="linkFolder()"
+              >
+                Link
+              </button>
+            </div>
+          </div>
+
+          <!-- Linked & healthy -->
+          <div
+            v-else-if="mirrorStatus && mirrorStatus.linked && !mirrorStatus.is_broken"
+            class="flex flex-col gap-1.5"
+          >
+            <div
+              class="flex items-center justify-between rounded border border-border bg-bg px-2 py-1.5"
+            >
+              <div class="flex min-w-0 flex-col leading-tight">
+                <span class="truncate text-[12px] text-main" :title="mirrorStatus.folder_name ?? ''">
+                  {{ mirrorStatus.folder_name ?? '(unnamed)' }}
+                </span>
+                <span
+                  class="text-[10px] uppercase tracking-wider text-tertiary"
+                >
+                  {{ mirrorStatus.provider }}
+                </span>
+              </div>
+              <button
+                class="rounded px-2 py-1 text-[11px] text-secondary transition-colors hover:bg-hover hover:text-main disabled:opacity-40"
+                :disabled="mirrorBusy"
+                @click="unlinkFolder"
+              >
+                Unlink
+              </button>
+            </div>
+            <p class="text-[10px] leading-relaxed text-tertiary">
+              Files in <code>input/</code> and <code>output/</code> sync to
+              this folder. Renaming the folder in Drive is fine — we
+              follow the folder by id.
+            </p>
+          </div>
+
+          <!-- Linked but broken -->
+          <div
+            v-else-if="mirrorStatus && mirrorStatus.linked && mirrorStatus.is_broken"
+            class="flex flex-col gap-1.5"
+          >
+            <p
+              class="rounded border border-warning/40 bg-warning/10 px-2 py-1.5 text-[11px] leading-relaxed text-warning"
+            >
+              The linked Drive folder is missing (deleted or trashed).
+              Re-link to a new folder to resume sync.
+            </p>
+            <div class="flex items-center gap-1">
+              <input
+                v-model="linkFolderName"
+                type="text"
+                placeholder="New Drive folder name"
+                class="flex-1 rounded border border-border bg-bg px-2 py-1.5 text-[12px] text-main placeholder-tertiary focus:border-accent/40 focus:outline-none"
+                @keydown.enter.prevent="linkFolder(true)"
+              />
+              <button
+                class="rounded bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+                :disabled="!linkFolderName.trim() || mirrorBusy"
+                @click="linkFolder(true)"
+              >
+                Re-link
+              </button>
+            </div>
+          </div>
+
+          <div v-if="mirrorError" class="text-[11px] text-danger">
+            {{ mirrorError }}
+          </div>
+        </section>
       </div>
 
       <!-- Messages -->
@@ -422,11 +581,13 @@
 <script lang="ts" setup>
 import {
   ArrowDownToLine,
+  ArrowLeft,
   Copy,
   CornerDownRight,
   FileText,
   History,
   Paperclip,
+  Pencil,
   Plus,
   RefreshCw,
   Send,
@@ -445,6 +606,12 @@ import {
   writeFile,
   type WriteResult,
 } from '@/api/files'
+import {
+  getMirrorStatus,
+  linkMirror,
+  unlinkMirror,
+  type MirrorStatus,
+} from '@/api/mirror'
 import { streamRun } from '@/api/runs'
 import {
   createThread,
@@ -459,7 +626,7 @@ import { htmlToMarkdown, markdownToHtml } from '@/utils/mdFormatter'
 const THREAD_KEY = 'sprih.threadId'
 const TITLE_KEY = 'sprih.threadTitle'
 
-type ViewMode = 'chat' | 'history'
+type ViewMode = 'chat' | 'history' | 'editThread'
 const THINK_TAG = '<think>'
 const THINK_TAG_END = '</think>'
 
@@ -490,8 +657,19 @@ const historyThreads = ref<ThreadSummary[]>([])
 const historyLoading = ref(false)
 const historyError = ref<string | null>(null)
 
+// Edit thread panel state.
+const editingThread = ref<ThreadSummary | null>(null)
+const editTitle = ref('')
+const savingTitle = ref(false)
+const mirrorStatus = ref<MirrorStatus | null>(null)
+const mirrorBusy = ref(false)
+const mirrorError = ref<string | null>(null)
+const linkFolderName = ref('')
+
 const headerSubtitle = computed(() => {
   if (viewMode.value === 'history') return 'select a thread'
+  if (viewMode.value === 'editThread')
+    return editingThread.value?.title ?? 'editing thread'
   if (threadTitle.value) return threadTitle.value
   if (threadId.value) return `thread ${threadId.value.slice(0, 8)}…`
   return 'no thread yet'
@@ -880,6 +1058,94 @@ async function refreshHistory() {
       e instanceof Error ? e.message : `Load failed: ${String(e)}`
   } finally {
     historyLoading.value = false
+  }
+}
+
+// ── Edit thread panel ───────────────────────────────────────────────────
+
+async function openEditThread(t: ThreadSummary) {
+  if (streaming.value) return
+  editingThread.value = t
+  editTitle.value = t.title ?? ''
+  linkFolderName.value = ''
+  mirrorError.value = null
+  mirrorStatus.value = null
+  viewMode.value = 'editThread'
+  mirrorBusy.value = true
+  try {
+    mirrorStatus.value = await getMirrorStatus(t.thread_id)
+  } catch (e) {
+    mirrorError.value =
+      e instanceof Error ? e.message : `Status fetch failed: ${String(e)}`
+  } finally {
+    mirrorBusy.value = false
+  }
+}
+
+function closeEditThread() {
+  editingThread.value = null
+  mirrorStatus.value = null
+  mirrorError.value = null
+  linkFolderName.value = ''
+  viewMode.value = 'history'
+  // Refresh history so a renamed thread shows the new title.
+  refreshHistory()
+}
+
+async function saveTitle() {
+  const t = editingThread.value
+  if (!t) return
+  const next = editTitle.value.trim()
+  if (!next || next === (t.title ?? '') || savingTitle.value) return
+  savingTitle.value = true
+  try {
+    await updateThreadMetadata(t.thread_id, { title: next })
+    // Mirror updated title locally so the close handler's refresh is
+    // smooth even on slow networks.
+    editingThread.value = { ...t, title: next }
+    if (threadId.value === t.thread_id) {
+      threadTitle.value = next
+      localStorage.setItem(TITLE_KEY, next)
+    }
+  } catch (e) {
+    mirrorError.value =
+      e instanceof Error ? e.message : `Rename failed: ${String(e)}`
+  } finally {
+    savingTitle.value = false
+  }
+}
+
+async function linkFolder(ifBroken = false) {
+  const t = editingThread.value
+  const name = linkFolderName.value.trim()
+  if (!t || !name || mirrorBusy.value) return
+  mirrorBusy.value = true
+  mirrorError.value = null
+  try {
+    await linkMirror(t.thread_id, name, ifBroken)
+    mirrorStatus.value = await getMirrorStatus(t.thread_id)
+    linkFolderName.value = ''
+  } catch (e) {
+    mirrorError.value =
+      e instanceof Error ? e.message : `Link failed: ${String(e)}`
+  } finally {
+    mirrorBusy.value = false
+  }
+}
+
+async function unlinkFolder() {
+  const t = editingThread.value
+  if (!t || mirrorBusy.value) return
+  mirrorBusy.value = true
+  mirrorError.value = null
+  try {
+    await unlinkMirror(t.thread_id)
+    mirrorStatus.value = await getMirrorStatus(t.thread_id)
+  } catch (e) {
+    mirrorError.value =
+      e instanceof Error ? e.message : `Unlink failed: ${String(e)}`
+  } finally {
+    mirrorBusy.value = false
   }
 }
 
