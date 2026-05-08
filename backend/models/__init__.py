@@ -8,6 +8,7 @@ from backend.models.mirror_credentials import MirrorCredentials
 from backend.models.search_query import SearchQuery
 from backend.models.search_result import SearchResult
 from backend.models.thread import Thread
+from backend.models.thread_mirror_mapping import ThreadMirrorMapping
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "SearchQuery",
     "SearchResult",
     "Thread",
+    "ThreadMirrorMapping",
 ]

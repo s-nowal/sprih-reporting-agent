@@ -25,6 +25,7 @@ from backend.config import settings
 from backend.infra.registry import get_db, get_storage
 from backend.models.mirror_credentials import MirrorCredentials
 from backend.models.thread import Thread
+from backend.models.thread_mirror_mapping import ThreadMirrorMapping
 from backend.services.agent.workspace import workspace_prefix as _s3_workspace_prefix
 
 logger = logging.getLogger(__name__)
@@ -112,12 +113,12 @@ def _guess_mime_type(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Mirror state on Thread row
+# Mirror mapping state — separate ``thread_mirror_mappings`` table
 # ---------------------------------------------------------------------------
 #
-# Mirror mapping (provider, folder id, title, last_synced_at) lives directly
-# on the ``threads`` row — see backend/models/thread.py. The helpers below
-# read/write those columns; the rest of the orchestration is unchanged.
+# One row per linked thread; absence of a row means the thread isn't
+# mirrored. The helpers below isolate the storage shape from the
+# orchestration above.
 
 
 async def _get_thread(thread_id: str) -> Thread | None:
@@ -127,43 +128,71 @@ async def _get_thread(thread_id: str) -> Thread | None:
         thread_id: Thread id.
 
     Returns:
-        The Thread ORM row, or ``None`` if it doesn't exist.
+        The Thread ORM row, or ``None`` if the thread doesn't exist.
     """
     db = get_db()
     async with db() as session:
         return await session.get(Thread, thread_id)
 
 
-async def _set_mirror_folder(
+async def _get_mapping(thread_id: str) -> ThreadMirrorMapping | None:
+    """Fetch the mirror mapping row for a thread, if one exists.
+
+    Args:
+        thread_id: Thread id.
+
+    Returns:
+        The ``ThreadMirrorMapping`` ORM row, or ``None`` if the thread
+        isn't currently linked to any mirror folder.
+    """
+    db = get_db()
+    async with db() as session:
+        return await session.get(ThreadMirrorMapping, thread_id)
+
+
+async def _set_mapping(
     thread_id: str,
     provider: str,
-    thread_title: str,
-    provider_folder_id: str,
+    folder_id: str,
+    thread_title: str | None = None,
 ) -> None:
-    """Persist the mirror folder mapping fields on the thread row.
+    """Upsert the mirror mapping for a thread.
 
-    The thread row must already exist — the run handler creates it via
-    ``_ensure_thread`` before mirror operations run.
+    Creates a row if none exists, otherwise updates the
+    ``provider`` / ``folder_id`` / ``thread_title`` fields. The
+    ``last_synced_at`` field is left untouched here — it's owned by
+    ``_set_last_synced``.
 
     Args:
         thread_id: Thread id.
         provider: Provider key (``"google_drive"`` etc.).
-        thread_title: Display name used for the provider-side folder.
-        provider_folder_id: Provider-side folder id for this thread.
+        folder_id: Provider-side folder id.
+        thread_title: Optional cached folder name for display.
     """
     db = get_db()
     async with db() as session:
-        row = await session.get(Thread, thread_id)
+        row = await session.get(ThreadMirrorMapping, thread_id)
         if row is None:
-            return
-        row.mirror_provider = provider
-        row.mirror_thread_title = thread_title
-        row.mirror_folder_id = provider_folder_id
+            row = ThreadMirrorMapping(
+                thread_id=thread_id,
+                provider=provider,
+                folder_id=folder_id,
+                thread_title=thread_title,
+            )
+            session.add(row)
+        else:
+            row.provider = provider
+            row.folder_id = folder_id
+            if thread_title is not None:
+                row.thread_title = thread_title
         await session.commit()
 
 
 async def _set_last_synced(thread_id: str, when: datetime) -> None:
-    """Update ``mirror_last_synced_at`` on the thread row.
+    """Update ``last_synced_at`` on the mirror mapping row.
+
+    No-op if the thread has no mapping (i.e. the link was deleted in
+    between sync start and end — race we tolerate silently).
 
     Args:
         thread_id: Thread id.
@@ -171,10 +200,10 @@ async def _set_last_synced(thread_id: str, when: datetime) -> None:
     """
     db = get_db()
     async with db() as session:
-        row = await session.get(Thread, thread_id)
+        row = await session.get(ThreadMirrorMapping, thread_id)
         if row is None:
             return
-        row.mirror_last_synced_at = when
+        row.last_synced_at = when
         await session.commit()
 
 
@@ -347,7 +376,9 @@ class MirrorProvider(ABC):
             # if it's missing we silently skip rather than create one here.
             logger.warning("setup_thread_folder: no thread row for %s", thread_id)
             return None
-        if thread.mirror_folder_id:
+
+        existing = await _get_mapping(thread_id)
+        if existing is not None:
             return thread
 
         title = generate_thread_title()
@@ -363,11 +394,11 @@ class MirrorProvider(ABC):
 
         provider_folder_id = await asyncio.to_thread(_build)
 
-        await _set_mirror_folder(
+        await _set_mapping(
             thread_id=thread_id,
             provider=self.provider_name,
+            folder_id=provider_folder_id,
             thread_title=title,
-            provider_folder_id=provider_folder_id,
         )
         logger.info(
             "Provisioned %s folder %s for thread %s (title=%r) under %s/%s",
@@ -378,7 +409,7 @@ class MirrorProvider(ABC):
             agent_name,
             title,
         )
-        return await _get_thread(thread_id)
+        return thread
 
     async def sync_in(
         self, enterprise_id: str, thread_id: str, agent_name: str
@@ -398,16 +429,16 @@ class MirrorProvider(ABC):
         Returns:
             Number of files pulled. ``0`` if the thread has no mirror folder.
         """
-        thread = await _get_thread(thread_id)
-        if thread is None or not thread.mirror_folder_id:
+        mapping = await _get_mapping(thread_id)
+        if mapping is None:
             return 0
 
         mirror_subdirs = _mirror_subdirs_for(agent_name)
         if not mirror_subdirs:
             return 0
 
-        cutoff = thread.mirror_last_synced_at  # may be None
-        folder_id = thread.mirror_folder_id
+        cutoff = mapping.last_synced_at  # may be None
+        folder_id = mapping.folder_id
         provider = self  # capture for the worker
 
         def _do_sync() -> int:
@@ -460,16 +491,16 @@ class MirrorProvider(ABC):
         Returns:
             Number of files pushed. ``0`` if the thread has no mirror folder.
         """
-        thread = await _get_thread(thread_id)
-        if thread is None or not thread.mirror_folder_id:
+        mapping = await _get_mapping(thread_id)
+        if mapping is None:
             return 0
 
         mirror_subdirs = _mirror_subdirs_for(agent_name)
         if not mirror_subdirs:
             return 0
 
-        cutoff = thread.mirror_last_synced_at  # may be None
-        folder_id = thread.mirror_folder_id
+        cutoff = mapping.last_synced_at  # may be None
+        folder_id = mapping.folder_id
         provider = self
 
         def _do_sync() -> int:
