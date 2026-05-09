@@ -8,11 +8,12 @@
       <div
         class="flex items-center gap-2 rounded-sm border border-border bg-bg-secondary px-2 py-1.5"
       >
+        <img :src="sprihLogo" alt="Sprih" class="h-4 w-auto shrink-0" />
         <div class="flex min-w-0 flex-1 flex-col leading-tight">
           <span
             class="text-[11px] font-semibold uppercase tracking-wider text-main"
           >
-            Sprih Reporting Agent
+            Reporting Agent
           </span>
           <span class="truncate text-[10px] text-tertiary">
             {{ headerSubtitle }}
@@ -268,7 +269,7 @@
           v-if="!displayMessages.length"
           class="flex h-full flex-col items-center justify-center gap-3 text-center"
         >
-          <Sparkles :size="22" class="text-accent/50" />
+          <img :src="sprihMark" alt="Sprih" class="h-10 w-10 opacity-80" />
           <p class="text-[12px] font-semibold tracking-wide text-secondary">
             How can I help you today?
           </p>
@@ -591,13 +592,14 @@ import {
   Plus,
   RefreshCw,
   Send,
-  Sparkles,
   Square,
   X,
 } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { insertFormattedResult, insertResult } from '@/api/common'
+import sprihLogo from '@/assets/brand/sprih-logo.png'
+import sprihMark from '@/assets/brand/sprih-mark.png'
 import {
   readFile,
   SYNC_PATH,
