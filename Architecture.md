@@ -6,7 +6,7 @@ ESG compliance reporting platform. Three data ingestion paths — **public web r
 
 **Key architectural choices:**
 - **Own FastAPI server** with `langgraph` library (MIT) as execution engine. No dependency on `langgraph-api` (Elastic License). Swap boundary is the service layer — if we replace langgraph later, only `AgentService` internals change.
-- **Agent Protocol-compatible endpoints** (threads/runs) so `deep-agent-ui` works as frontend with minimal changes.
+- **Agent Protocol-compatible endpoints** (threads/runs) so any LangGraph-compatible client (e.g. the `word-plugin/` task pane) can talk to the backend with minimal glue.
 - **Repo mirrors production.** Only `infra/` adapters differ per environment. Sandbox: local filesystem (S3), MariaDB, local Neo4j, local Qdrant — all in Docker.
 
 ---
@@ -180,7 +180,7 @@ Used by agents for RAG — "what does source X say about emissions?"
 │   ├── integration/
 │   └── fixtures/
 │
-├── frontend/                            # deep-agent-ui fork (chat-based UI)
+├── word-plugin/                         # Word task-pane add-in (Vue 3 + Vite, Office.js)
 │   └── ...                              # speaks Agent Protocol, talks to our FastAPI
 │
 ├── data/                                # sandbox simulation mount (gitignored)

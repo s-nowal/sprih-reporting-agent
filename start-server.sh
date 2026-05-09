@@ -21,14 +21,14 @@ echo "Starting backend on :8000 ..."
 SPRIH_AUTH_DEV_MODE=true uv run uvicorn backend.main:app --reload --port 8000 &
 BACKEND_PID=$!
 
-# Frontend
-echo "Starting frontend on :3000 ..."
-cd "$ROOT/frontend" && npm run dev &
+# Frontend (Word add-in served by Vite over HTTPS)
+echo "Starting word-plugin on :3000 ..."
+cd "$ROOT/word-plugin" && npm run dev &
 FRONTEND_PID=$!
 
 echo ""
 echo "Backend:  http://localhost:8000  (API docs: http://localhost:8000/docs)"
-echo "Frontend: http://localhost:3000"
+echo "Frontend: https://localhost:3000  (Word add-in — HTTPS)"
 echo "Press Ctrl+C to stop both."
 echo ""
 

@@ -1,20 +1,20 @@
 # ESG Reporting Platform
 
 ## Project
-FastAPI backend + Next.js frontend for AI-powered ESG (Environmental, Social, Governance) compliance reporting. Agents are built with LangGraph (MIT) and exposed via an Agent Protocol-compatible API.
+FastAPI backend + Word add-in frontend for AI-powered ESG (Environmental, Social, Governance) compliance reporting. Agents are built with LangGraph (MIT) and exposed via an Agent Protocol-compatible API.
 
 ## Stack
 - **Runtime**: Python 3.12+, managed with `uv`
 - **Backend**: FastAPI + uvicorn
 - **Agent framework**: LangGraph (MIT) — swap boundary is `AgentService`
 - **LLM**: Anthropic Claude (`anthropic:claude-sonnet-4-6-20251115`)
-- **Frontend**: Next.js (deep-agent-ui fork) at `frontend/`
+- **Frontend**: Vue 3 + Vite Word task-pane add-in at `word-plugin/` (Office.js)
 - **Databases**: MariaDB (metadata), Neo4j (knowledge graph), Qdrant (vector search)
 
 ## Commands
 ```bash
-./dev.sh                            # start backend (:8000) + frontend (:3000)
-./stop.sh                           # stop both
+./start-server.sh                   # start backend (:8000) + word-plugin (:3000, HTTPS)
+./stop-server.sh                    # stop both
 uv run uvicorn backend.main:app --reload --port 8000   # backend only
 uv run pytest                       # run tests
 uv add <package>                    # add dependency
