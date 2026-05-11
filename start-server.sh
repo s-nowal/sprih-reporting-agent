@@ -17,11 +17,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Backend
-echo "Starting backend on :8003 ..."
+echo "Starting backend on :8000 ..."
 uv sync
 uv run playwright install chromium
 uv lock
-SPRIH_AUTH_DEV_MODE=true uv run uvicorn backend.main:app --reload --port 8003 &
+SPRIH_AUTH_DEV_MODE=true uv run uvicorn backend.main:app --reload --port 8000 &
 BACKEND_PID=$!
 
 # Frontend (Word add-in served by Vite over HTTPS)
@@ -30,7 +30,7 @@ cd "$ROOT/word-plugin" && npm run dev &
 FRONTEND_PID=$!
 
 echo ""
-echo "Backend:  http://localhost:8003  (API docs: http://localhost:8003/docs)"
+echo "Backend:  http://localhost:8000  (API docs: http://localhost:8000/docs)"
 echo "Frontend: https://localhost:3000  (Word add-in — HTTPS)"
 echo "Press Ctrl+C to stop both."
 echo ""

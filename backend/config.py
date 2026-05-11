@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # and the resulting refresh token is stored per enterprise.
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
-    google_oauth_redirect_uri: str = "http://localhost:8003/auth/google/callback"
+    google_oauth_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
     # Per-agent mirror policy: which workspace subdirectories sync to Drive.
     # Keys are graph names (assistant_id), values are subdir names. Anything

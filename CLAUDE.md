@@ -13,9 +13,9 @@ FastAPI backend + Word add-in frontend for AI-powered ESG (Environmental, Social
 
 ## Commands
 ```bash
-./start-server.sh                   # start backend (:8003) + word-plugin (:3000, HTTPS)
+./start-server.sh                   # start backend (:8000) + word-plugin (:3000, HTTPS)
 ./stop-server.sh                    # stop both
-uv run uvicorn backend.main:app --reload --port 8003   # backend only
+uv run uvicorn backend.main:app --reload --port 8000   # backend only
 uv run pytest                       # run tests
 uv add <package>                    # add dependency
 docker compose up -d                # start MariaDB, Neo4j, Qdrant

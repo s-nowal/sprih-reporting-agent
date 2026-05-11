@@ -10,16 +10,19 @@
       >
         <img :src="sprihLogo" alt="Sprih" class="h-4 w-auto shrink-0" />
         <div class="flex min-w-0 flex-1 flex-col leading-tight">
-          <span
-            class="text-[11px] font-semibold uppercase tracking-wider text-main"
-          >
-            Reporting Agent
-          </span>
           <span class="truncate text-[10px] text-tertiary">
             {{ headerSubtitle }}
           </span>
         </div>
         <div class="flex items-center gap-0.5">
+          <button
+            class="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main disabled:opacity-40"
+            title="New chat"
+            :disabled="streaming"
+            @click="newChat"
+          >
+            <Plus :size="13" />
+          </button>
           <button
             class="flex h-6 w-6 items-center justify-center rounded transition-colors disabled:opacity-40"
             :class="
@@ -34,12 +37,12 @@
             <History :size="13" />
           </button>
           <button
-            class="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main disabled:opacity-40"
-            title="New chat"
-            :disabled="streaming"
-            @click="newChat"
+            class="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main"
+            :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'"
+            @click="toggleDarkMode"
           >
-            <Plus :size="13" />
+            <Sun v-if="darkMode" :size="13" />
+            <Moon v-else :size="13" />
           </button>
         </div>
       </div>
@@ -497,43 +500,56 @@
         </div>
 
         <div
-          class="flex items-end gap-1 rounded border border-border bg-bg-tertiary px-2 py-1 transition-colors focus-within:border-accent/40"
+          class="flex items-end gap-0.5 rounded border border-border bg-bg-tertiary pl-1 pr-2 py-1 transition-colors focus-within:border-accent/40"
         >
-          <button
-            class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-tertiary transition-colors hover:bg-hover hover:text-main disabled:opacity-40"
-            title="Attach files"
-            :disabled="streaming"
-            @click="openFilePicker"
-          >
-            <Paperclip :size="12" />
-          </button>
+          <div ref="attachMenuRef" class="relative shrink-0">
+            <button
+              class="flex h-5 w-5 items-center justify-center rounded transition-colors disabled:opacity-40"
+              :class="
+                syncArmed
+                  ? 'text-accent hover:bg-accent/15'
+                  : 'text-tertiary hover:bg-hover hover:text-main'
+              "
+              title="More options"
+              :disabled="streaming"
+              @click.stop="attachMenuOpen = !attachMenuOpen"
+            >
+              <EllipsisVertical :size="12" />
+            </button>
 
-          <button
-            class="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors disabled:opacity-40"
-            :class="
-              syncArmed
-                ? 'bg-accent/15 text-accent hover:bg-accent/25'
-                : 'text-tertiary hover:bg-hover hover:text-main'
-            "
-            :title="
-              syncArmed
-                ? 'Disarm sync (push current doc on send)'
-                : 'Push current doc to backend on next send'
-            "
-            :disabled="streaming"
-            @click="toggleSync"
-          >
-            <RefreshCw :size="12" />
-          </button>
-
-          <button
-            class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-tertiary transition-colors hover:bg-hover hover:text-main disabled:opacity-40"
-            title="Pull synced doc into Word"
-            :disabled="streaming || pulling"
-            @click="pullIntoDocument"
-          >
-            <ArrowDownToLine :size="12" />
-          </button>
+            <div
+              v-if="attachMenuOpen"
+              class="absolute bottom-full left-0 z-10 mb-1 flex min-w-[160px] flex-col rounded border border-border bg-bg-secondary py-0.5 shadow-md"
+            >
+              <button
+                class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-main transition-colors hover:bg-hover"
+                @click="openFilePicker(); attachMenuOpen = false"
+              >
+                <Paperclip :size="11" class="shrink-0 text-tertiary" />
+                Add files or photos
+              </button>
+              <button
+                class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-hover"
+                :class="syncArmed ? 'text-accent' : 'text-main'"
+                @click="toggleSync(); attachMenuOpen = false"
+              >
+                <Upload
+                  :size="11"
+                  class="shrink-0"
+                  :class="syncArmed ? 'text-accent' : 'text-tertiary'"
+                />
+                {{ syncArmed ? 'Send Document (armed)' : 'Send Document' }}
+              </button>
+              <button
+                class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-main transition-colors hover:bg-hover disabled:opacity-40"
+                :disabled="pulling"
+                @click="pullIntoDocument(); attachMenuOpen = false"
+              >
+                <Download :size="11" class="shrink-0 text-tertiary" />
+                Get Document
+              </button>
+            </div>
+          </div>
 
           <textarea
             ref="inputTextarea"
@@ -558,7 +574,7 @@
             v-else
             class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-accent text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-30"
             title="Send"
-            :disabled="!input.trim() && pendingFiles.length === 0"
+            :disabled="!input.trim() && pendingFiles.length === 0 && !syncArmed && !selectedTextPreview"
             @click="onSubmit"
           >
             <Send :size="10" />
@@ -581,18 +597,21 @@
 
 <script lang="ts" setup>
 import {
-  ArrowDownToLine,
   ArrowLeft,
   Copy,
   CornerDownRight,
+  Download,
+  EllipsisVertical,
   FileText,
   History,
+  Moon,
   Paperclip,
   Pencil,
   Plus,
-  RefreshCw,
   Send,
   Square,
+  Sun,
+  Upload,
   X,
 } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -627,6 +646,21 @@ import { htmlToMarkdown, markdownToHtml } from '@/utils/mdFormatter'
 
 const THREAD_KEY = 'sprih.threadId'
 const TITLE_KEY = 'sprih.threadTitle'
+const DARK_KEY = 'sprih.darkMode'
+
+const darkMode = ref(localStorage.getItem(DARK_KEY) === 'true')
+
+function applyDarkMode(on: boolean) {
+  document.documentElement.classList.toggle('dark', on)
+}
+
+function toggleDarkMode() {
+  darkMode.value = !darkMode.value
+  applyDarkMode(darkMode.value)
+  localStorage.setItem(DARK_KEY, String(darkMode.value))
+}
+
+applyDarkMode(darkMode.value)
 
 type ViewMode = 'chat' | 'history' | 'editThread'
 const THINK_TAG = '<think>'
@@ -689,6 +723,15 @@ const pendingFiles = ref<PendingFile[]>([])
 const syncArmed = ref(false)
 const pulling = ref(false)
 const syncStatus = ref<string | null>(null)
+
+const attachMenuOpen = ref(false)
+const attachMenuRef = ref<HTMLElement | null>(null)
+
+function closeAttachMenu(e: MouseEvent) {
+  if (attachMenuRef.value && !attachMenuRef.value.contains(e.target as Node)) {
+    attachMenuOpen.value = false
+  }
+}
 
 // Hide tool messages and AI messages with no content + no tool calls
 // (the agent emits an empty placeholder before its first stream chunk).
@@ -790,7 +833,7 @@ async function onSubmit() {
   // Allow sending with no text iff the user attached a file or armed a
   // sync — either the file-reference or sync suffix becomes the body.
   if (
-    (!typed && pendingFiles.value.length === 0 && !syncArmed.value) ||
+    (!typed && pendingFiles.value.length === 0 && !syncArmed.value && !selectedTextPreview.value) ||
     streaming.value
   )
     return
@@ -1262,6 +1305,7 @@ function dismissSelectedTextPreview() {
 let selectionHandlerInstalled = false
 
 onMounted(() => {
+  document.addEventListener('click', closeAttachMenu)
   hydrate()
   // Office.context.document exists only inside Word, not in plain browsers.
   // Guard the handler registration so the page still loads at /index.html.
@@ -1283,6 +1327,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('click', closeAttachMenu)
   abortController.value?.abort()
   if (selectionHandlerInstalled) {
     try {

@@ -157,11 +157,11 @@
     --color-text-primary: #0f1419;
     --color-text-secondary: #475569;
     --color-text-tertiary: #94a3b8;
-    --color-background-primary: #ffffff;
-    --color-background-secondary: #f5f7fa;
-    --color-background-tertiary: #fafbfc;
-    --color-surface: rgb(255 255 255 / 80%);
-    --color-surface-elevated: rgb(255 255 255 / 95%);
+    --color-background-primary: #f4f6f9;
+    --color-background-secondary: #eaecf2;
+    --color-background-tertiary: #eff1f6;
+    --color-surface: rgb(244 246 249 / 80%);
+    --color-surface-elevated: rgb(244 246 249 / 95%);
     --color-border: rgb(0 0 0 / 8%);
     --color-border-secondary: rgb(0 0 0 / 4%);
     --color-primary: #54c999;
@@ -189,14 +189,14 @@
   :root.dark,
   .dark,
   [data-theme='dark'] {
-    --color-text-primary: #ffffff;
-    --color-text-secondary: rgb(255 255 255 / 80%);
-    --color-text-tertiary: rgb(255 255 255 / 55%);
-    --color-background-primary: #0b0d10;
-    --color-background-secondary: #13161b;
-    --color-background-tertiary: #0a0c0f;
-    --color-surface: rgb(19 22 27 / 80%);
-    --color-surface-elevated: rgb(26 29 34 / 95%);
+    --color-text-primary: #dce1ea;
+    --color-text-secondary: rgb(220 225 234 / 80%);
+    --color-text-tertiary: rgb(220 225 234 / 55%);
+    --color-background-primary: #1c1f27;
+    --color-background-secondary: #232830;
+    --color-background-tertiary: #181b22;
+    --color-surface: rgb(28 31 39 / 80%);
+    --color-surface-elevated: rgb(35 40 48 / 95%);
     --color-border: rgb(255 255 255 / 6%);
     --color-border-secondary: rgb(255 255 255 / 4%);
     --color-primary: #54c999;
@@ -208,7 +208,7 @@
     --color-danger: #f87171;
     --color-error: #cb2431;
     --color-hover: rgb(255 255 255 / 5%);
-    --color-on-accent: #0b0d10;
+    --color-on-accent: #1c1f27;
     --color-stripe: rgb(255 255 255 / 3%);
     --color-code-bg: rgb(255 255 255 / 6%);
     --shadow-sm: 0 1px 3px rgb(0 0 0 / 25%), 0 1px 2px rgb(0 0 0 / 30%);
