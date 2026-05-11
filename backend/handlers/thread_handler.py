@@ -35,7 +35,7 @@ async def _assert_ownership(thread_id: str, enterprise: EnterpriseContext) -> di
     t = await thread_service.get(thread_id)
     if not t:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if t["metadata"].get("enterprise_id") != enterprise.enterprise_id:
+    if t.get("enterprise_id") != enterprise.enterprise_id:
         raise HTTPException(status_code=404, detail="Thread not found")
     return t
 
@@ -64,7 +64,6 @@ async def create_thread(
         raise HTTPException(status_code=409, detail="Thread already exists")
 
     metadata = dict(data.metadata or {})
-    metadata["enterprise_id"] = enterprise.enterprise_id
 
     t = await thread_service.create(thread_id, enterprise.enterprise_id, metadata)
     # Scaffold the workspace folder layout so the file manager UI can show

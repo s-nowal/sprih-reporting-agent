@@ -129,6 +129,26 @@ async def update(thread_id: str, metadata: dict[str, Any]) -> dict | None:
         return _to_dict(row)
 
 
+async def set_status(thread_id: str, status: str) -> None:
+    """Update the lifecycle ``status`` column on a thread row.
+
+    Used by the run handler to flip a thread between ``idle`` / ``busy`` /
+    ``error`` / ``interrupted`` around an agent run. Silent no-op if the
+    thread doesn't exist (which can only happen if it was deleted mid-run).
+
+    Args:
+        thread_id: UUID of the thread to update.
+        status: One of ``idle``, ``busy``, ``interrupted``, ``error``.
+    """
+    db = get_db()
+    async with db() as session:
+        row = await session.get(Thread, thread_id)
+        if row is None:
+            return
+        row.status = status
+        await session.commit()
+
+
 async def update_values(thread_id: str, values: dict[str, Any]) -> None:
     """Persist agent state values back to the thread row after a run completes.
 
@@ -178,6 +198,7 @@ def _to_dict(row: Thread) -> dict:
     """
     return {
         "thread_id": row.thread_id,
+        "enterprise_id": row.enterprise_id,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "metadata": row.metadata_ or {},

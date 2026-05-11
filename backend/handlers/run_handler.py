@@ -21,6 +21,7 @@ from backend.services import mirror
 from backend.services.agent import get_agent_service
 from backend.services.agent import thread as thread_service
 from backend.services.agent import workspace as workspace_service
+from backend.services.agent.title import generate_thread_title
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,44 @@ _runs: dict[str, dict] = {}
 def _to_response(r: dict) -> RunResponse:
     """Convert an internal run dict to a Pydantic ``RunResponse``."""
     return RunResponse(**r)
+
+
+def _first_user_message(input_data: dict | None) -> str | None:
+    """Extract the user-message text from a run input payload.
+
+    The Agent Protocol input shape is ``{"messages": [{type|role, content}, ...]}``.
+    For a fresh thread, the client sends a single human message; this helper
+    returns its textual content. Returns ``None`` for resume calls (no input)
+    or when no human message can be located.
+
+    Args:
+        input_data: The ``data.input`` value from a ``RunCreate`` request,
+            or ``None`` when resuming from an interrupt.
+
+    Returns:
+        The plain-text content of the human message, or ``None``.
+    """
+    if not input_data:
+        return None
+    messages = input_data.get("messages") or []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        kind = msg.get("type") or msg.get("role")
+        if kind in ("human", "user"):
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+            # Some clients send content as a list of parts; concatenate text.
+            if isinstance(content, list):
+                parts = [
+                    p.get("text", "") for p in content
+                    if isinstance(p, dict) and p.get("type") == "text"
+                ]
+                joined = " ".join(t for t in parts if t).strip()
+                if joined:
+                    return joined
+    return None
 
 
 def _serialize_messages(messages: list) -> list[dict]:
@@ -130,7 +169,7 @@ async def stream_run(
         SSE event dicts: ``metadata`` → N × ``values`` → ``end``
         (or ``error`` → ``end`` on failure).
     """
-    await _assert_ownership(thread_id, enterprise)
+    thread_row = await _assert_ownership(thread_id, enterprise)
     now = datetime.now(timezone.utc)
 
     _runs[run_id] = {
@@ -159,6 +198,17 @@ async def stream_run(
         )
     except Exception as e:
         logger.warning("Failed to create job: %s", e)
+
+    # --- Flip thread status to 'busy' for the duration of the run -----------
+    # Per ConOps §2.1 / §2.4: threads.status is the canonical "is this thread
+    # free to run?" signal. Returns to 'idle' on success or 'error' on failure
+    # in the try/except below.
+    await thread_service.set_status(thread_id, "busy")
+
+    # --- Detect first-message state for title generation --------------------
+    # If metadata.title is unset, the title generator runs at stream end
+    # against the user message in this run's input.
+    needs_title = not (thread_row.get("metadata") or {}).get("title")
 
     # --- Pull user edits from the mirror before the run --------------------
     # Mirror linkage is opt-in per thread now (see PUT /threads/{tid}/mirror).
@@ -238,12 +288,32 @@ async def stream_run(
         if job_id:
             await job_service.update_status(job_id, "completed")
 
+        # --- First-message side-effect: generate and persist the title ------
+        # Per ConOps §2.1: the user's first message is used to generate the
+        # thread title and persist it on threads.metadata['title'], visible
+        # in the chat header and the conversation history.
+        if needs_title:
+            user_msg = _first_user_message(input_data)
+            if user_msg:
+                try:
+                    title = await generate_thread_title(user_msg)
+                    await thread_service.update(thread_id, {"title": title})
+                except Exception as e:
+                    logger.warning(
+                        "Title generation/persist failed for %s: %s",
+                        thread_id, e,
+                    )
+
+        # --- Flip thread status back to 'idle' on success -------------------
+        await thread_service.set_status(thread_id, "idle")
+
     except Exception as e:
         logger.exception("Agent execution failed for run %s", run_id)
         _runs[run_id]["status"] = "error"
         _runs[run_id]["updated_at"] = datetime.now(timezone.utc)
         if job_id:
             await job_service.update_status(job_id, "failed")
+        await thread_service.set_status(thread_id, "error")
         yield {
             "event": "error",
             "data": json.dumps({"error": type(e).__name__, "message": str(e)}),
