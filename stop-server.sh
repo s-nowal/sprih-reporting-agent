@@ -2,7 +2,7 @@
 # Stop backend + word-plugin dev servers.
 # Usage: ./stop-server.sh
 
-echo "Stopping backend (port 8000)..."
+echo "Stopping backend (port 8003)..."
 pkill -f "uvicorn backend.main" 2>/dev/null && echo "  Stopped." || echo "  Not running."
 
 echo "Stopping word-plugin (port 3000)..."

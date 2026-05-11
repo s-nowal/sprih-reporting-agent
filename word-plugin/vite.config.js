@@ -34,7 +34,7 @@ function loadDevCert(env) {
 
 // To avoid mixed-content blocks (HTTPS plugin → HTTP backend) and CORS
 // preflights, the dev server reverse-proxies all backend paths to the
-// FastAPI on :8000. The plugin's BASE_URL stays empty so fetches are
+// FastAPI on :8003. The plugin's BASE_URL stays empty so fetches are
 // same-origin relative paths that Vite forwards.
 const BACKEND_PATHS = [
   '/threads',
@@ -51,7 +51,7 @@ const proxy = Object.fromEntries(
   BACKEND_PATHS.map((p) => [
     p,
     {
-      target: 'http://localhost:8000',
+      target: 'http://localhost:8003',
       changeOrigin: true,
       // SSE responses must not be buffered by the proxy.
       configure: (proxyServer) => {

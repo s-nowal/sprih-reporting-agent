@@ -24,6 +24,37 @@ logger = logging.getLogger(__name__)
 # ToolMessage.content field. Full content is stored in S3 (artifact side).
 _AGENT_EXCERPT_LENGTH = 2000
 
+# ------------------------storing all URLs in .csv----------------------------------------------------
+
+import csv
+import os
+from datetime import datetime
+
+_FETCH_LOG_PATH = "web_fetch_log.csv"
+
+def _log_fetch(url: str, success: bool) -> None:
+    """Append a fetch record (url, success) to the tracking CSV.
+
+    Creates the file with a header row on first call; appends on every
+    subsequent call so the log survives across multiple tool invocations.
+
+    Args:
+        url:     The URL that was fetched.
+        success: True if the fetch produced no error, False otherwise.
+    """
+    file_exists = os.path.isfile(_FETCH_LOG_PATH)
+
+    with open(_FETCH_LOG_PATH, "a", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        if not file_exists:
+            writer.writerow(["timestamp", "url", "success"])   # header
+        writer.writerow([
+            datetime.utcnow().isoformat(timespec="seconds"),
+            url,
+            "yes" if success else "no",
+        ])
+
+#----------------------------------------------------------------------------------
 
 def _format_tool_content(url: str, result: dict[str, Any]) -> str:
     """Format the text content returned to the agent in the tool message.
@@ -90,4 +121,5 @@ async def web_fetch(
     job_id: str | None = config.get("configurable", {}).get("job_id")
     result = await fetch_url(result_id=result_id, job_id=job_id)
     url = result.get("url") or ""
+    _log_fetch(url, success=not result.get("error"))
     return _format_tool_content(url, result), result

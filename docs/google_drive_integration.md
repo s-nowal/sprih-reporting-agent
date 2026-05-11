@@ -76,7 +76,7 @@ agent never edit a file simultaneously (they take turns).
 3. **OAuth consent screen** → User type **Internal** (Workspace).
    - Scopes: `https://www.googleapis.com/auth/drive`.
 4. **Credentials → Create OAuth client ID → Web application**.
-   - Authorized redirect URI: `http://localhost:8000/auth/google/callback`
+   - Authorized redirect URI: `http://localhost:8003/auth/google/callback`
      (add prod URLs when deploying).
 5. Copy the client id and secret into `.env`:
    ```
@@ -105,7 +105,7 @@ Agent identity: `sachchit.vekaria@sprih.com`. Folder owner: `write.to.sachchit@g
 
 ```bash
 # 1. Get the consent URL
-curl -s http://localhost:8000/auth/google/start
+curl -s http://localhost:8003/auth/google/start
 # {"authorize_url": "https://accounts.google.com/o/oauth2/v2/auth?...", "enterprise_id": "sprih"}
 
 # 2. Open the authorize_url in a browser logged in as sachchit.vekaria@sprih.com.
@@ -113,7 +113,7 @@ curl -s http://localhost:8000/auth/google/start
 #    "Connected ✓" — refresh token now persisted for enterprise=sprih.
 
 # 3. Verify
-curl -s http://localhost:8000/auth/google/status
+curl -s http://localhost:8003/auth/google/status
 # {"connected": true, "agent_email": "sachchit.vekaria@sprih.com",
 #  "drive_parent_folder_id": null}
 
@@ -123,7 +123,7 @@ curl -s http://localhost:8000/auth/google/status
 #    - Copy the folder ID from the URL (the path component after /folders/)
 
 # 5. Tell the backend which folder is the parent
-curl -X POST http://localhost:8000/auth/google/parent-folder \
+curl -X POST http://localhost:8003/auth/google/parent-folder \
   -H "Content-Type: application/json" \
   -d '{"drive_parent_folder_id": "1RcgD8HzYs0H-q-EKIo1tnXJX2vyRwYNP"}'
 # {"connected": true, "agent_email": "sachchit.vekaria@sprih.com",

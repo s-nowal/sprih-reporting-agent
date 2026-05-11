@@ -35,7 +35,7 @@ async def test_section_2_5_upload_file_to_thread(
     payload = (
         b"supplier_id,name,country,annual_spend_usd\n"
         b"S001,SteelCo,DE,1250000\n"
-        b"S002,Polymerix,US,980000\n"
+        b"S002,Polymerix,US,980030\n"
         b"S003,LogiTrans,IN,640000\n"
     )
 
