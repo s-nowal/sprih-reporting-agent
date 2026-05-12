@@ -19,6 +19,7 @@ later: a real ``BotoS3Storage``). No local temp directory is involved.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from deepagents import CompiledSubAgent, create_deep_agent
@@ -28,11 +29,17 @@ from langchain.chat_models import init_chat_model
 from backend.ai.agents.research_agent import build_research_graph
 from backend.ai.prompts.agents.reporting import REPORTING_SYSTEM_PROMPT
 from backend.ai.tools.user_input import request_user_input
+from backend.ai.tools.terminal_tools import upload_full_directory, run_terminal_command, add_file_to_local
 from backend.infra.registry import get_storage
 from backend.services.agent.s3_backend import S3Backend
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
+
+# Read skill content once at import time — the file is static and small.
+_PARSER_SKILL_MD = (
+    Path(__file__).parent.parent / "skills" / "parser-skill" / "SKILL.md"
+).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +153,15 @@ def build_reporting_graph(
     Returns:
         A compiled LangGraph ``StateGraph`` ready for ``ainvoke`` / ``astream``.
     """
+    # --- Seed skills into the workspace so the agent can discover them --------
+    # S3Backend maps virtual paths "/..." to "{workspace_prefix}/..." in storage,
+    # so writing here makes the file visible at /skills/parser-skill/SKILL.md
+    # inside the agent's virtual filesystem.
+    get_storage().write_text(
+        f"{workspace_prefix}/skills/parser-skill/SKILL.md",
+        _PARSER_SKILL_MD,
+    )
+
     # --- Research subagent: shares the workspace, scoped to /research/ -------
     # The subagent gets its own S3Backend (same prefix as the parent) wrapped
     # in a policy that allows writes only under /research/. The cite_source
@@ -180,7 +196,8 @@ def build_reporting_graph(
             inner=S3Backend(storage=get_storage(), prefix=workspace_prefix),
             deny_prefixes=["input", "reference", "research"],
         ),
-        tools=[request_user_input],
+        tools=[upload_full_directory, run_terminal_command, add_file_to_local],
+        skills=["/skills/"],
         checkpointer=checkpointer,
         system_prompt=REPORTING_SYSTEM_PROMPT,
     )

@@ -243,7 +243,7 @@ function chunkBlocks(blocks: Block[]): Block[][] {
 
 async function insertChunksAtSelection(
   htmlChunks: string[],
-  firstLocation: Word.InsertLocation
+  firstLocation: Word.InsertLocation | 'Replace' | 'Start' | 'End' | 'Before' | 'After'
 ): Promise<void> {
   if (htmlChunks.length === 0) return
 

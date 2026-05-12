@@ -20,7 +20,14 @@ trap cleanup EXIT INT TERM
 echo "Starting backend on :8000 ..."
 uv run playwright install --with-deps chromium
 uv sync
-SPRIH_AUTH_DEV_MODE=true uv run uvicorn backend.main:app --reload --port 8000 &
+
+SPRIH_AUTH_DEV_MODE=true uv run python -c "
+import asyncio, sys
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+import uvicorn
+uvicorn.run('backend.main:app', reload=False, port=8000)
+" &
 BACKEND_PID=$!
 
 # Frontend (Word add-in served by Vite over HTTPS)

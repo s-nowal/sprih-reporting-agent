@@ -362,16 +362,18 @@
               class="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
             >
               <button
-                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main"
+                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main disabled:cursor-not-allowed disabled:opacity-40"
                 title="Replace selection"
+                :disabled="!isWordContext"
                 @click="insertToDoc(m, 'replace')"
               >
                 <FileText :size="9" />
                 <span>Replace</span>
               </button>
               <button
-                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main"
+                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main disabled:cursor-not-allowed disabled:opacity-40"
                 title="Append after selection"
+                :disabled="!isWordContext"
                 @click="insertToDoc(m, 'append')"
               >
                 <Plus :size="9" />
@@ -444,7 +446,7 @@
             <div
               class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-accent/15"
             >
-              <RefreshCw :size="11" class="text-accent" />
+              <EllipsisVertical :size="11" class="text-accent" />
             </div>
             <div class="flex min-w-0 flex-col leading-tight">
               <span
@@ -529,8 +531,9 @@
                 Add files or photos
               </button>
               <button
-                class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-hover"
+                class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
                 :class="syncArmed ? 'text-accent' : 'text-main'"
+                :disabled="!isWordContext"
                 @click="toggleSync(); attachMenuOpen = false"
               >
                 <Upload
@@ -542,7 +545,7 @@
               </button>
               <button
                 class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-main transition-colors hover:bg-hover disabled:opacity-40"
-                :disabled="pulling"
+                :disabled="pulling || !isWordContext"
                 @click="pullIntoDocument(); attachMenuOpen = false"
               >
                 <Download :size="11" class="shrink-0 text-tertiary" />
@@ -616,7 +619,7 @@ import {
 } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { insertFormattedResult, insertResult } from '@/api/common'
+import { insertFormattedResult } from '@/api/common'
 import sprihLogo from '@/assets/brand/sprih-logo.png'
 import sprihMark from '@/assets/brand/sprih-mark.png'
 import {
@@ -726,6 +729,7 @@ const syncStatus = ref<string | null>(null)
 
 const attachMenuOpen = ref(false)
 const attachMenuRef = ref<HTMLElement | null>(null)
+const isWordContext = ref(false)
 
 function closeAttachMenu(e: MouseEvent) {
   if (attachMenuRef.value && !attachMenuRef.value.contains(e.target as Node)) {
@@ -1256,10 +1260,9 @@ function adjustTextareaHeight() {
 
 const insertTypeRef = ref<'replace' | 'append'>('replace')
 
-function insertToDoc(m: AgentMessage, mode: 'replace' | 'append') {
+async function insertToDoc(m: AgentMessage, mode: 'replace' | 'append') {
   insertTypeRef.value = mode
-  // insertResult expects a Vue ref so it can read .value at call time.
-  insertResult(cleanText(m), insertTypeRef)
+  await insertFormattedResult(cleanText(m), insertTypeRef)
 }
 
 async function copyToClipboard(m: AgentMessage) {
@@ -1313,6 +1316,7 @@ onMounted(() => {
     const Office = (window as unknown as { Office?: typeof globalThis.Office })
       .Office
     if (Office?.context?.document?.addHandlerAsync) {
+      isWordContext.value = true
       Office.context.document.addHandlerAsync(
         Office.EventType.DocumentSelectionChanged,
         fetchSelectedTextPreview,

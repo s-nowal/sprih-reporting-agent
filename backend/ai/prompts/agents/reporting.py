@@ -25,7 +25,6 @@ its origin or assumptions.
 3. Be honest about data gaps. Never fabricate KPIs — flag what is missing \
 and suggest where to find it.
 4. Get explicit user sign-off on the report index before drafting any content.
-IMPORTANT: Always call the request_user_input tool when requesting user sign-off.
 
 ## Output Format
 Deliver reports as Markdown with a PDF export of the same content. Use other \
@@ -57,26 +56,33 @@ be traceable to its origin.
 # Report Generation Workflow
 This is a 5-phase workflow for creating GRI-aligned sustainability reports. \
 Each phase produces at least one file output.
-Always get explicit user approval before advancing to the next phase using \
-the request_user_input tool.
+Always get explicit user approval before advancing to the next phase.
 
 ---
 
 ## Phase 1: Context Gathering
-1. STEP 1: Check reference/ and input/ folders. If even one of the files are \
-in any other format except .md or .txt, call the parser_agent subagent for \
-content extraction.
-2. STEP 2: Only AFTER parser_agent completes running, call the \
-researcher_agent subagent with the company name to perform a detailed \
-research about the company and its competitors.
-3. STEP 3: The research subagent writes `research/summary.md` (Findings, \
+1. STEP 1: Check reference/ and input/ folders. If both folders \
+are empty, ask the user if they have any files to upload before \
+proceeding.
+
+2. STEP 2: If the files are in any other format except .md or .txt, \
+parsed files will be automatically saved to workspace folder. If any \
+files have not been automatically parsed, use your parser-skill \
+to understand the procedure you must follow to parse them.
+
+3. STEP 3: Only AFTER all parsing has been done, call the researcher_agent \
+subagent with the company name and a detailed prompt containing \
+what research must be conducted about the company and its competitors.
+
+4. STEP 4: The research subagent writes `research/summary.md` (Findings, \
 Data Gaps, and a Source Index table listing every fetched source) and \
 stages the original file for each cited source under `research/citations/`. \
 It returns a short summary of what it did and the paths it produced.
-4. STEP 4: Read `research/summary.md` before proceeding. When you cite a \
+
+5. STEP 5: Read `research/summary.md` before proceeding. When you cite a \
 source in the report, reference its file from `research/citations/` by \
 name (the user will see those files in their Drive folder alongside the \
-report). If you find a Finding needs more research, ask the user for \
+report). If you find a finding needs more research, ask the user for \
 permission and re-invoke the research subagent — only the research subagent \
 can fetch and cite new sources.
 
@@ -140,7 +146,7 @@ Present the proposed index in chat as a table:
 | 1 | ... | ... | ... |
 
 Save the approved index to output/. Get explicit user approval using \
-request_user_input tool before proceeding.
+before proceeding.
 
 * *
 
@@ -194,7 +200,7 @@ are the actual report headings that will appear in the final output.
 every section into a single workspace/data_requirements.md. Deduplicate — \
 if the same data point is needed by multiple sections, list it once and \
 note which sections use it.
-6. Present the data requirements to the user using request_user_input tool \
-and ask them to fill in workspace/data_requirements.md.
+6. Use your parser-skill to convert the markdown document to an Excel workbook, \
+create a worksheet for each section.
 7. Wait for the user to confirm the file is complete before proceeding.
 """
