@@ -1,19 +1,48 @@
-FROM python:3.12-slim
+# Stage 1: Build Vue.js Word add-in
+FROM node:22-alpine AS frontend-build
+WORKDIR /app
+
+COPY word-plugin/package.json word-plugin/package-lock.json ./
+RUN npm ci
+
+COPY word-plugin/ .
+RUN npm run build
+
+# Stage 2: Python backend + nginx serving the built frontend
+FROM python:3.12-slim AS final
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nginx \
+        supervisor \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Install Python dependencies (cached layer — rebuilt only when lock file changes)
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+# Skip browser binary download — crawl4ai/playwright binaries are ~300 MB
+# and not needed in the cloud image. Set PLAYWRIGHT_BROWSERS_PATH if you
+# need browser-based scraping in prod.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-# Install Chromium + its system deps (playwright fetches them via --with-deps)
-RUN uv run playwright install --with-deps chromium
+# Install third-party deps first so this layer is cached across code changes
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project --no-cache \
+    && find /app/.venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null; true
 
 # Copy source and install the project package
 COPY backend/ ./backend/
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --frozen --no-dev --no-editable --no-cache
 
-EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Serve built Vue SPA via nginx on port 80
+COPY --from=frontend-build /app/dist /usr/share/nginx/html
+COPY docker/nginx.conf /etc/nginx/sites-available/default
+
+# supervisord manages nginx + uvicorn in one container
+RUN mkdir -p /var/log/supervisor
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+EXPOSE 80 8000
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
