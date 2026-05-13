@@ -45,6 +45,7 @@ const BACKEND_PATHS = [
   '/info',
   '/health',
   '/google_auth',
+  '/auth',
 ]
 
 const proxy = Object.fromEntries(

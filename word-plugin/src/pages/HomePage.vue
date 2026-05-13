@@ -3,6 +3,97 @@
     class="relative flex h-full w-full flex-col bg-bg p-2 text-main"
     style="font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; font-size: 14px"
   >
+    <!-- Google Drive auth fallback (when popup/redirect is blocked) -->
+    <div
+      v-if="driveAuthUrl"
+      class="absolute inset-0 z-50 flex items-center justify-center bg-black/40"
+    >
+      <div class="mx-4 flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-lg">
+        <span class="text-[13px] font-semibold text-main">Open this link to connect Google Drive</span>
+        <a
+          :href="driveAuthUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="break-all text-[11px] text-accent underline"
+          @click="driveAuthUrl = null"
+        >
+          {{ driveAuthUrl }}
+        </a>
+        <p v-if="driveConnectError" class="text-[11px] text-danger">{{ driveConnectError }}</p>
+        <button
+          class="self-end rounded border border-border px-3 py-1.5 text-[11px] font-semibold text-secondary transition-colors hover:bg-hover hover:text-main"
+          @click="driveAuthUrl = null; driveConnectError = null"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+
+    <!-- Google Drive connection prompt -->
+    <div
+      v-if="showDrivePrompt"
+      class="absolute inset-0 z-50 flex items-center justify-center bg-black/40"
+    >
+      <div class="mx-4 flex flex-col gap-4 rounded-md border border-border bg-bg p-4 shadow-lg">
+        <div class="flex flex-col gap-1">
+          <span class="text-[13px] font-semibold text-main">Connect Google Drive</span>
+          <span class="text-[11px] leading-relaxed text-tertiary">
+            Do you want to connect your Google Drive?
+          </span>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button
+            class="rounded border border-border px-3 py-1.5 text-[11px] font-semibold text-secondary transition-colors hover:bg-hover hover:text-main"
+            @click="dismissDrivePrompt"
+          >
+            No
+          </button>
+          <button
+            class="rounded bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent transition-colors hover:bg-accent-hover"
+            @click="onDrivePromptYes"
+          >
+            Yes
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Parent Folder ID prompt (shown after Drive auth redirect) -->
+    <div
+      v-if="showFolderIdPrompt"
+      class="absolute inset-0 z-50 flex items-center justify-center bg-black/40"
+    >
+      <div class="mx-4 flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-lg">
+        <div class="flex items-center justify-between">
+          <span class="text-[13px] font-semibold text-main">Google Drive Folder</span>
+          <button
+            class="flex h-5 w-5 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main"
+            @click="showFolderIdPrompt = false"
+          >
+            <X :size="12" />
+          </button>
+        </div>
+        <span class="text-[11px] leading-relaxed text-tertiary">
+          Enter the ID of the parent Google Drive folder where thread folders will be created.
+        </span>
+        <input
+          v-model="folderIdInput"
+          type="text"
+          placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs"
+          class="rounded border border-border bg-bg-tertiary px-2 py-1.5 text-[12px] text-main placeholder-tertiary focus:border-accent/40 focus:outline-none"
+          @keydown.enter.prevent="onFolderIdOk"
+        />
+        <div class="flex justify-end">
+          <button
+            class="rounded bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="!folderIdInput.trim()"
+            @click="onFolderIdOk"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="relative flex h-full w-full flex-col gap-1 rounded-md">
       <!-- Header -->
       <div
@@ -620,6 +711,7 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { insertFormattedResult } from '@/api/common'
+import { BASE_URL } from '@/api/config'
 import sprihLogo from '@/assets/brand/sprih-logo.png'
 import sprihMark from '@/assets/brand/sprih-mark.png'
 import {
@@ -646,6 +738,67 @@ import {
   type ThreadSummary,
 } from '@/api/threads'
 import { htmlToMarkdown, markdownToHtml } from '@/utils/mdFormatter'
+
+const DRIVE_PROMPT_KEY = 'sprih.drivePromptSeen'
+const showDrivePrompt = ref(localStorage.getItem(DRIVE_PROMPT_KEY) !== 'true')
+const driveAuthUrl = ref<string | null>(null)
+const driveConnectError = ref<string | null>(null)
+
+function dismissDrivePrompt() {
+  showDrivePrompt.value = false
+  localStorage.setItem(DRIVE_PROMPT_KEY, 'true')
+}
+
+async function onDrivePromptYes() {
+  dismissDrivePrompt()
+  await sendConnectionRequest()
+}
+
+async function sendConnectionRequest() {
+  driveConnectError.value = null
+  try {
+    const res = await fetch(`${BASE_URL}/auth/google/start`, {
+      headers: { accept: 'application/json' },
+    })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    const { authorize_url } = await res.json()
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const officeUi = (window as any).Office?.context?.ui
+    if (typeof officeUi?.openBrowserWindow === 'function') {
+      officeUi.openBrowserWindow(authorize_url)
+    } else {
+      const opened = window.open(authorize_url, '_blank')
+      if (!opened) {
+        driveAuthUrl.value = authorize_url
+        return
+      }
+    }
+
+    showFolderIdPrompt.value = true
+  } catch (e) {
+    driveConnectError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+const showFolderIdPrompt = ref(false)
+const folderIdInput = ref('')
+
+function onFolderIdOk() {
+  const id = folderIdInput.value.trim()
+  if (!id) return
+  showFolderIdPrompt.value = false
+  folderIdInput.value = ''
+  handleFolderId(id)
+}
+
+async function handleFolderId(folderId: string) {
+  await fetch(`${BASE_URL}/auth/google/parent-folder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ drive_parent_folder_id: folderId }),
+  })
+}
 
 const THREAD_KEY = 'sprih.threadId'
 const TITLE_KEY = 'sprih.threadTitle'
@@ -1177,6 +1330,7 @@ async function linkFolder(ifBroken = false) {
   } catch (e) {
     mirrorError.value =
       e instanceof Error ? e.message : `Link failed: ${String(e)}`
+    showFolderIdPrompt.value = true
   } finally {
     mirrorBusy.value = false
   }
