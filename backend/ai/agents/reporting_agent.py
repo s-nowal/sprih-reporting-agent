@@ -29,7 +29,7 @@ from langchain.chat_models import init_chat_model
 from backend.ai.agents.research_agent import build_research_graph
 from backend.ai.prompts.agents.reporting import REPORTING_SYSTEM_PROMPT
 from backend.ai.tools.user_input import request_user_input
-from backend.ai.tools.terminal_tools import upload_full_directory, run_terminal_command, add_file_to_local
+from backend.ai.tools.terminal_tools import run_terminal_command
 from backend.infra.registry import get_storage
 from backend.services.agent.s3_backend import S3Backend
 
@@ -196,7 +196,7 @@ def build_reporting_graph(
             inner=S3Backend(storage=get_storage(), prefix=workspace_prefix),
             deny_prefixes=["input", "reference", "research"],
         ),
-        tools=[upload_full_directory, run_terminal_command, add_file_to_local],
+        tools=[run_terminal_command],
         skills=["/skills/"],
         checkpointer=checkpointer,
         system_prompt=REPORTING_SYSTEM_PROMPT,
