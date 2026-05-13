@@ -125,7 +125,8 @@ def _sync_from_container(prefix: str) -> dict:
         timeout=40,
     )
     find_resp.raise_for_status()
-    file_paths = [p.strip() for p in find_resp.json().splitlines() if p.strip()]
+    raw = "".join(item["data"] for item in find_resp.json().get("output", []))
+    file_paths = [p.strip() for p in raw.splitlines() if p.strip()]
 
     # --- Read each file and write to storage ---
     # Strip the workdir prefix so "/<workdir>/input/x.pdf" → "input/x.pdf"
@@ -193,7 +194,7 @@ async def run_terminal_command(command: str, wait: int = 300, *, config: Runnabl
         timeout=wait + 10,
     )
     resp.raise_for_status()
-    output = resp.json()
+    output = "".join(item["data"] for item in resp.json().get("output", []))
 
     # --- Sync container files back to workspace after running ---
     _sync_from_container(prefix)
