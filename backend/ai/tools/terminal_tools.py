@@ -54,29 +54,40 @@ async def get_workspace_path(thread_id: str) -> str | None:
     return workspace_prefix(row["enterprise_id"], thread_id)
 
 
-def _sync_to_container(prefix: str) -> dict:
+async def _sync_to_container(config: RunnableConfig) -> dict:
     """Upload all files from the S3 workspace to the open-terminal container.
 
-    Enumerates every object under ``prefix`` via the storage adapter and POSTs
-    each one to ``/files/upload``, preserving the relative folder structure
-    under ``_CONTAINER_WORKDIR``.
+    Enumerates every object under the thread's workspace prefix via the storage
+    adapter and POSTs each one to ``/files/upload``, preserving the relative
+    folder structure under ``_CONTAINER_WORKDIR``. Tracks which container
+    directories were populated so the caller can scope the sync-back to those
+    same dirs.
 
     Args:
-        prefix: S3 prefix for the thread workspace.
+        config: LangGraph runnable config carrying ``thread_id``.
 
     Returns:
-        Dict with ``uploaded`` (list of relative paths) and ``failed``
-        (list of ``{path, error}`` dicts).
+        Dict with ``uploaded`` (list of relative paths), ``failed``
+        (list of ``{path, error}`` dicts), and ``container_dirs`` (sorted list
+        of container directory paths that received at least one file).
+        Returns ``{"error": ...}`` if the thread is not found.
     """
+    thread_id: str = config["configurable"]["thread_id"]
+    prefix = await get_workspace_path(thread_id)
+    if prefix is None:
+        return {"error": f"thread '{thread_id}' not found"}
+
     storage = get_storage()
     objects = storage.list_objects(prefix)
     uploaded: list[str] = []
     failed: list[dict] = []
+    container_dirs: set[str] = set()
 
     for obj in objects:
         key: str = obj["key"]
         rel_path = key[len(prefix):].lstrip("/")
         remote_dir = str(PurePosixPath(_CONTAINER_WORKDIR) / Path(rel_path).parent.as_posix())
+        container_dirs.add(remote_dir)
         try:
             content = storage.read(key)
             response = requests.post(
@@ -93,35 +104,46 @@ def _sync_to_container(prefix: str) -> dict:
         except Exception as exc:
             failed.append({"path": rel_path, "error": str(exc)})
 
-    return {"uploaded": uploaded, "failed": failed}
+    return {"uploaded": uploaded, "failed": failed, "container_dirs": sorted(container_dirs)}
 
 
-def _sync_from_container(prefix: str) -> dict:
-    """Download all files from the container workdir back to the S3 workspace.
+async def _sync_from_container(config: RunnableConfig, container_dirs: list[str]) -> dict:
+    """Download files from specific container directories back to the S3 workspace.
 
-    Runs ``find`` inside the container to enumerate every file under
-    ``_CONTAINER_WORKDIR``, then reads each one via ``/files/read`` and writes
-    it to ``{prefix}/{rel_path}`` in storage — capturing both pre-existing files
-    and any new or modified files the agent produced.
+    Runs ``find`` scoped to ``container_dirs`` (the directories that were
+    populated during upload), reads each file via ``/files/read``, and writes
+    it to ``{prefix}/{rel_path}`` in storage — capturing both modified files
+    and new ones the agent created inside those directories.
 
     Args:
-        prefix: S3 prefix for the thread workspace.
+        config: LangGraph runnable config carrying ``thread_id``.
+        container_dirs: Container directory paths to scan (returned by
+            ``_sync_to_container``).
 
     Returns:
         Dict with ``saved`` (list of relative paths) and ``failed``
         (list of ``{path, error}`` dicts).
+        Returns ``{"error": ...}`` if the thread is not found.
     """
+    if not container_dirs:
+        return {"saved": [], "failed": []}
+
+    thread_id: str = config["configurable"]["thread_id"]
+    prefix = await get_workspace_path(thread_id)
+    if prefix is None:
+        return {"error": f"thread '{thread_id}' not found"}
+
     storage = get_storage()
     saved: list[str] = []
     failed: list[dict] = []
 
-    # --- List all files in container workdir ---
-    workdir = _CONTAINER_WORKDIR.rstrip("/") or "/"
+    # --- List files only inside the workspace directories ---
+    dirs_arg = " ".join(f'"{d}"' for d in container_dirs)
     find_resp = requests.post(
         f"{BASE_URL}/execute",
         headers=_AUTH_HEADERS,
         params={"wait": 30},
-        json={"command": f"find {workdir} -type f 2>/dev/null | sort"},
+        json={"command": f"find {dirs_arg} -type f 2>/dev/null | sort"},
         timeout=40,
     )
     find_resp.raise_for_status()
@@ -129,7 +151,7 @@ def _sync_from_container(prefix: str) -> dict:
     file_paths = [p.strip() for p in raw.splitlines() if p.strip()]
 
     # --- Read each file and write to storage ---
-    # Strip the workdir prefix so "/<workdir>/input/x.pdf" → "input/x.pdf"
+    workdir = _CONTAINER_WORKDIR.rstrip("/") or "/"
     workdir_prefix = workdir if workdir == "/" else workdir + "/"
     for abs_path in file_paths:
         rel_path = abs_path.removeprefix(workdir_prefix).lstrip("/")
@@ -148,10 +170,10 @@ def _sync_from_container(prefix: str) -> dict:
             storage_key = f"{prefix}/{rel_path}"
             if Path(rel_path).suffix.lower() in _BINARY_EXTENSIONS:
                 try:
-                    raw = base64.b64decode(content)
+                    raw_bytes = base64.b64decode(content)
                 except Exception:
-                    raw = content.encode("utf-8")
-                storage.write(storage_key, raw)
+                    raw_bytes = content.encode("utf-8")
+                storage.write(storage_key, raw_bytes)
             else:
                 storage.write_text(storage_key, content)
             saved.append(rel_path)
@@ -166,8 +188,8 @@ async def run_terminal_command(command: str, wait: int = 300, *, config: Runnabl
     """Execute any shell command inside the open-terminal container and return its output.
 
     Before running the command, the thread's full workspace is synced to the
-    container. After the command completes, all container files — including any
-    new or modified ones produced by the command — are synced back to the
+    container. After the command completes, all files in those same container
+    directories — including new or modified ones — are synced back to the
     workspace.
 
     Args:
@@ -177,15 +199,10 @@ async def run_terminal_command(command: str, wait: int = 300, *, config: Runnabl
     Returns:
         stdout/stderr output from the command, truncated if very large.
     """
-    thread_id: str = config["configurable"]["thread_id"]
-    prefix = await get_workspace_path(thread_id)
-    if prefix is None:
-        return f"Error: thread '{thread_id}' not found"
+    upload_result = await _sync_to_container(config)
+    if "error" in upload_result:
+        return upload_result
 
-    # --- Upload workspace to container before running ---
-    _sync_to_container(prefix)
-
-    # --- Execute the command ---
     resp = requests.post(
         f"{BASE_URL}/execute",
         headers=_AUTH_HEADERS,
@@ -194,9 +211,14 @@ async def run_terminal_command(command: str, wait: int = 300, *, config: Runnabl
         timeout=wait + 10,
     )
     resp.raise_for_status()
-    output = "".join(item["data"] for item in resp.json().get("output", []))
-
-    # --- Sync container files back to workspace after running ---
-    _sync_from_container(prefix)
-
+    resp_data = resp.json()
+    if resp_data.get("status") == "running":
+        partial = "".join(item["data"] for item in resp_data.get("output", []))
+        return (
+            f"Command is still running after {wait}s (id: {resp_data.get('id', '?')}).\n"
+            f"Call run_terminal_command again with a larger wait value to wait longer.\n"
+            f"Partial output so far:\n{partial}"
+        )
+    output = "".join(item["data"] for item in resp_data.get("output", []))
+    await _sync_from_container(config, upload_result["container_dirs"])
     return _truncate_output(output, label="Terminal output")
