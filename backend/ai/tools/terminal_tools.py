@@ -79,6 +79,7 @@ async def _sync_to_container(config: RunnableConfig) -> dict:
 
     storage = get_storage()
     objects = storage.list_objects(prefix)
+    
     uploaded: list[str] = []
     failed: list[dict] = []
     container_dirs: set[str] = set()
@@ -103,7 +104,6 @@ async def _sync_to_container(config: RunnableConfig) -> dict:
             failed.append({"path": rel_path, "error": f"HTTP {exc.response.status_code}: {exc.response.text[:200]}"})
         except Exception as exc:
             failed.append({"path": rel_path, "error": str(exc)})
-
     return {"uploaded": uploaded, "failed": failed, "container_dirs": sorted(container_dirs)}
 
 
