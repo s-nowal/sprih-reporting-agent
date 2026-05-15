@@ -952,13 +952,14 @@ const groupedMessages = computed<DisplayItem[]>(() => {
       items.push({ kind: 'human', msg: m })
     } else {
       // All non-human messages in displayMessages are type 'ai'.
-      const hasText = !!getMessageText(m)
-      if (m.tool_calls?.length && !hasText) {
-        // Pure planning step — accumulate calls, do not flush.
+      // Two independent checks — a message can accumulate tool calls AND flush text.
+      if (m.tool_calls?.length) {
         if (!groupId) groupId = m.id
         pendingCalls = [...pendingCalls, ...m.tool_calls]
-      } else {
-        // Text response (with or without tool_calls) — flush pending calls.
+      }
+      if (getMessageText(m)) {
+        // Any AI message with real text always produces a visible AssistantItem,
+        // carrying whatever tool calls have accumulated so far (including its own).
         items.push({ kind: 'assistant', id: groupId || m.id, calls: pendingCalls, msg: m })
         pendingCalls = []
         groupId = ''
