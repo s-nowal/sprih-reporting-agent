@@ -14,23 +14,23 @@ services:
       timeout: 5s
       retries: 10
 
-  neo4j:
-    image: neo4j:5
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      NEO4J_AUTH: neo4j/devpassword
-    volumes:
-      - neo4j_data:/data
+  # neo4j:
+  #   image: neo4j:5
+  #   ports:
+  #     - "7474:7474"
+  #     - "7687:7687"
+  #   environment:
+  #     NEO4J_AUTH: neo4j/devpassword
+  #   volumes:
+  #     - neo4j_data:/data
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   ports:
+  #     - "6333:6333"
+  #     - "6334:6334"
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
 
   open-terminal:
     image: ghcr.io/open-webui/open-terminal:latest
@@ -40,31 +40,31 @@ services:
       OPEN_TERMINAL_API_KEY: ${OPEN_TERMINAL_API_KEY:-}
     restart: unless-stopped
 
-  api:
-    build: .
-    ports:
-      - "80:80"
-      - "8000:8000"
-    env_file: .env
-    environment:
-      # Override localhost defaults so the app reaches sibling containers
-      SPRIH_DB_HOST: mariadb
-      OPEN_TERMINAL_URL: http://open-terminal:8000
-    volumes:
-      - api_data:/app/data
-    depends_on:
-      mariadb:
-        condition: service_healthy
-      neo4j:
-        condition: service_started
-      qdrant:
-        condition: service_started
-      open-terminal:
-        condition: service_started
-    restart: unless-stopped
+  # api:
+  #   build: .
+  #   ports:
+  #     - "80:80"
+  #     - "8000:8000"
+  #   env_file: .env
+  #   environment:
+  #     # Override localhost defaults so the app reaches sibling containers
+  #     SPRIH_DB_HOST: mariadb
+  #     OPEN_TERMINAL_URL: http://open-terminal:8000
+  #   volumes:
+  #     - api_data:/app/data
+  #   depends_on:
+  #     mariadb:
+  #       condition: service_healthy
+  #     neo4j:
+  #       condition: service_started
+  #     qdrant:
+  #       condition: service_started
+  #     open-terminal:
+  #       condition: service_started
+  #   restart: unless-stopped
 
 volumes:
   mariadb_data:
-  neo4j_data:
-  qdrant_data:
-  api_data:
+  # neo4j_data:
+  # qdrant_data:
+  # api_data:

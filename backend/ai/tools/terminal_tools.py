@@ -107,18 +107,27 @@ async def _sync_to_container(config: RunnableConfig) -> dict:
     return {"uploaded": uploaded, "failed": failed, "container_dirs": sorted(container_dirs)}
 
 
-async def _sync_from_container(config: RunnableConfig, container_dirs: list[str]) -> dict:
-    """Download files from specific container directories back to the S3 workspace.
+async def _sync_from_container(
+    config: RunnableConfig,
+    container_dirs: list[str],
+    skip_rel_paths: set[str] | None = None,
+) -> dict:
+    """Download agent-created files from the container back to the S3 workspace.
 
-    Runs ``find`` scoped to ``container_dirs`` (the directories that were
-    populated during upload), reads each file via ``/files/read``, and writes
-    it to ``{prefix}/{rel_path}`` in storage — capturing both modified files
-    and new ones the agent created inside those directories.
+    Runs ``find`` scoped to ``container_dirs``, reads each file via
+    ``/files/read``, and writes it to ``{prefix}/{rel_path}`` in storage.
+    Files listed in ``skip_rel_paths`` (the set uploaded by
+    ``_sync_to_container``) are left untouched — this prevents the
+    ``/files/read`` API from overwriting binary input files (e.g. PDFs)
+    with corrupted content.
 
     Args:
         config: LangGraph runnable config carrying ``thread_id``.
         container_dirs: Container directory paths to scan (returned by
             ``_sync_to_container``).
+        skip_rel_paths: Workspace-relative paths that were uploaded to the
+            container and should not be synced back. Defaults to ``None``
+            (sync everything, no skipping).
 
     Returns:
         Dict with ``saved`` (list of relative paths) and ``failed``
@@ -156,6 +165,8 @@ async def _sync_from_container(config: RunnableConfig, container_dirs: list[str]
     for abs_path in file_paths:
         rel_path = abs_path.removeprefix(workdir_prefix).lstrip("/")
         if not rel_path:
+            continue
+        if skip_rel_paths and rel_path in skip_rel_paths:
             continue
         try:
             file_resp = requests.get(
@@ -220,5 +231,5 @@ async def run_terminal_command(command: str, wait: int = 300, *, config: Runnabl
             f"Partial output so far:\n{partial}"
         )
     output = "".join(item["data"] for item in resp_data.get("output", []))
-    await _sync_from_container(config, upload_result["container_dirs"])
+    await _sync_from_container(config, upload_result["container_dirs"], skip_rel_paths=set(upload_result["uploaded"]))
     return _truncate_output(output, label="Terminal output")

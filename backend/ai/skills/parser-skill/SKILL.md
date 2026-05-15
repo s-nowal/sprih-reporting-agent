@@ -9,33 +9,21 @@ Convert files between any formats using the open-terminal container. This skill 
 
 ## Tools
 
-### `upload_full_directory()`
-Uploads the entire thread workspace (all subdirectories: `input/`, `output/`, `workspace/`, `reference/`) into the open-terminal container, preserving folder structure. Always call this first. Takes no arguments.
-
-- Files land at their relative paths inside the container: e.g. a file at `input/report.pdf` in the workspace becomes `/input/report.pdf` in the container.
-
 ### `run_terminal_command(command, wait=300)`
-Executes a shell command inside the container and returns stdout/stderr. Use this for installing packages, writing scripts, and running conversions.
+Executes a shell command inside the container and returns stdout/stderr. The workspace directory is automatically synced into the container before each run, and all output files are automatically synced back to local after. Use this for installing packages, writing scripts, and running conversions.
 
 - `command`: shell command string, e.g. `"python convert.py"` or `"pip install pymupdf --break-system-packages"`
 - `wait`: max seconds to wait (default 300); increase for long-running jobs
-
-### `add_file_to_local(env_path, local_filename)`
-Fetches a file from the container and writes it into the thread's `workspace/parsed/` directory. Call this after the conversion to save the result back.
-
-- `env_path`: path inside the container, e.g. `"/output.md"`
-- `local_filename`: filename to save as, e.g. `"report_converted.md"`
 
 ---
 
 ## General Workflow
 
-1. **Call `upload_full_directory()`** — stages all workspace files into the container
-2. **Identify** the source file path inside the container (e.g. `/input/report.pdf`) and target format
-3. **Write and run** a conversion script via `run_terminal_command`
-4. **Install** dependencies as needed via `run_terminal_command("pip install <pkg> --break-system-packages")`
-5. **Quality check** — inspect output with `run_terminal_command("wc -l /output.md")` etc.; re-run at a higher level if poor
-6. **Call `add_file_to_local(env_path, local_filename)`** — pulls the result into `workspace/parsed/`
+1. **Identify** the source file path inside the container (e.g. `/input/report.pdf`) and target format
+2. **Write and run** a conversion script via `run_terminal_command`
+3. **Install** dependencies as needed via `run_terminal_command("pip install <pkg> --break-system-packages")`
+4. **Quality check** — inspect output with `run_terminal_command("wc -l /output.md")` etc.; re-run at a higher level if poor
+5. Output files are automatically synced back to local after each `run_terminal_command` call
 
 ---
 
@@ -273,12 +261,6 @@ For any unlisted format: identify the extension, find the best Python library, e
 
 ---
 
-## Saving Output
+## Output Files
 
-Write output files anywhere inside the container (e.g. `/output.md`, `/output.xlsx`), then call `add_file_to_local` to persist them:
-
-```
-add_file_to_local(env_path="/output.md", local_filename="report_converted.md")
-```
-
-The file is written to `workspace/parsed/report_converted.md` in the thread workspace. Name output files clearly: `originalname_converted.ext`.
+Write output files anywhere inside the container (e.g. `/output.md`, `/output.xlsx`). All files created during a `run_terminal_command` call are automatically synced back to local — no additional step needed. Name output files clearly: `originalname_converted.ext`.

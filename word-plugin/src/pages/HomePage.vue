@@ -374,111 +374,132 @@
 
         <!-- Bubbles -->
         <div
-          v-for="m in displayMessages"
-          :key="m.id"
+          v-for="item in groupedMessages"
+          :key="item.kind === 'human' ? item.msg.id : item.id"
           class="group flex items-end gap-2"
-          :class="m.type === 'ai' ? 'assistant' : 'user justify-end'"
+          :class="item.kind === 'human' ? 'user justify-end' : 'assistant'"
         >
           <div
             class="flex min-w-0 flex-col gap-0.5"
-            :class="
-              m.type === 'ai' ? 'max-w-[90%] items-start' : 'max-w-[85%] items-end'
-            "
+            :class="item.kind === 'human' ? 'max-w-[85%] items-end' : 'max-w-[90%] items-start'"
           >
             <span
               class="px-1 text-[10px] font-semibold uppercase tracking-widest"
-              :class="m.type === 'ai' ? 'text-accent/60' : 'text-secondary'"
+              :class="item.kind === 'human' ? 'text-secondary' : 'text-accent/60'"
             >
-              {{ m.type === 'ai' ? 'assistant' : 'you' }}
+              {{ item.kind === 'human' ? 'you' : 'assistant' }}
             </span>
 
-            <div
-              class="rounded-sm border px-2 py-1.5 text-[12px] leading-relaxed wrap-break-word"
-              :class="
-                m.type === 'ai'
-                  ? 'border-border bg-bg-secondary text-main'
-                  : 'border-accent/20 bg-accent/5 text-main whitespace-pre-wrap'
-              "
-            >
-              <template v-for="(seg, idx) in renderSegments(m)" :key="idx">
-                <div
-                  v-if="seg.type === 'text' && m.type === 'ai'"
-                  v-html="markdownToHtml(seg.text)"
-                  class="ai-markdown"
-                />
-                <span v-else-if="seg.type === 'text'">{{ seg.text.trim() }}</span>
-                <details
-                  v-else
-                  class="mt-1 rounded border border-border bg-bg-tertiary"
-                >
-                  <summary
-                    class="cursor-pointer list-none px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-tertiary"
-                  >
-                    Thought process
-                  </summary>
-                  <pre
-                    class="m-0 whitespace-pre-wrap wrap-break-word px-2 py-1 text-[11px] text-tertiary"
-                  >{{ seg.text.trim() }}</pre>
-                </details>
-              </template>
+            <!-- Human message bubble -->
+            <template v-if="item.kind === 'human'">
+              <div class="rounded-sm border border-accent/20 bg-accent/5 px-2 py-1.5 text-[12px] leading-relaxed text-main whitespace-pre-wrap wrap-break-word">
+                {{ getMessageText(item.msg).trim() }}
+              </div>
+            </template>
 
-              <!-- Tool calls (collapsed) -->
+            <!-- Assistant: tool calls strip (collapsed) then text bubble — single label -->
+            <template v-else>
               <details
-                v-if="m.type === 'ai' && m.tool_calls?.length"
-                class="mt-1 rounded border border-border bg-bg-tertiary"
+                v-if="item.calls.length"
+                class="w-full rounded border border-border overflow-hidden"
               >
-                <summary
-                  class="cursor-pointer list-none px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-accent/60"
-                >
-                  {{ m.tool_calls.length }} tool call{{
-                    m.tool_calls.length === 1 ? '' : 's'
-                  }}
-                </summary>
-                <div class="flex flex-col gap-1 px-2 py-1">
-                  <div
-                    v-for="tc in m.tool_calls"
-                    :key="tc.id"
-                    class="font-mono text-[11px] text-tertiary"
+                <summary class="cursor-pointer list-none flex items-center gap-2 px-2.5 py-1.5 hover:bg-hover transition-colors">
+                  <span class="flex-1 text-[11px] font-semibold text-secondary">Tool calls</span>
+                  <span class="text-[10px] font-semibold text-secondary bg-bg-tertiary border border-border rounded-full px-2 py-0.5">
+                    {{ item.calls.length }}
+                  </span>
+                  <svg
+                    class="tool-calls-chevron w-3 h-3 text-secondary transition-transform duration-150"
+                    viewBox="0 0 12 12"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
                   >
-                    → <span class="text-secondary">{{ tc.name }}</span
-                    >({{ briefArgs(tc.args) }})
+                    <path d="M2 4l4 4 4-4" />
+                  </svg>
+                </summary>
+                <div class="flex flex-col divide-y divide-border border-t border-border">
+                  <div
+                    v-for="tc in item.calls"
+                    :key="tc.id"
+                    class="relative flex items-center gap-2.5 px-2.5 py-2"
+                  >
+                    <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent/40" />
+                    <div class="flex-shrink-0 w-6 h-6 rounded-md bg-accent/10 flex items-center justify-center text-accent">
+                      <Wrench :size="12" />
+                    </div>
+                    <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+                      <span class="text-[11px] font-medium text-main font-mono truncate">
+                        {{ mapped_tc(tc.name, 'name') }}
+                      </span>
+                      <span class="text-[10px] text-tertiary truncate">
+                        {{ mapped_tc(tc.name, 'desc') }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </details>
-            </div>
 
-            <!-- AI message actions -->
-            <div
-              v-if="m.type === 'ai' && cleanText(m)"
-              class="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-            >
-              <button
-                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main disabled:cursor-not-allowed disabled:opacity-40"
-                title="Replace selection"
-                :disabled="!isWordContext"
-                @click="insertToDoc(m, 'replace')"
+              <div
+                v-if="item.msg && renderSegments(item.msg).length"
+                class="rounded-sm border border-border bg-bg-secondary px-2 py-1.5 text-[12px] leading-relaxed text-main wrap-break-word"
               >
-                <FileText :size="9" />
-                <span>Replace</span>
-              </button>
-              <button
-                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main disabled:cursor-not-allowed disabled:opacity-40"
-                title="Append after selection"
-                :disabled="!isWordContext"
-                @click="insertToDoc(m, 'append')"
+                <template v-for="(seg, idx) in renderSegments(item.msg)" :key="idx">
+                  <div
+                    v-if="seg.type === 'text'"
+                    v-html="markdownToHtml(seg.text)"
+                    class="ai-markdown"
+                  />
+                  <details
+                    v-else
+                    class="mt-1 rounded border border-border bg-bg-tertiary"
+                  >
+                    <summary
+                      class="cursor-pointer list-none px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-tertiary"
+                    >
+                      Thought process
+                    </summary>
+                    <pre
+                      class="m-0 whitespace-pre-wrap wrap-break-word px-2 py-1 text-[11px] text-tertiary"
+                    >{{ seg.text.trim() }}</pre>
+                  </details>
+                </template>
+              </div>
+
+              <div
+                v-if="item.msg && cleanText(item.msg)"
+                class="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
               >
-                <Plus :size="9" />
-                <span>Append</span>
-              </button>
-              <button
-                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main"
-                title="Copy to clipboard"
-                @click="copyToClipboard(m)"
-              >
-                <Copy :size="9" />
-                <span>{{ copiedId === m.id ? 'Copied' : 'Copy' }}</span>
-              </button>
-            </div>
+                <button
+                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Replace selection"
+                  :disabled="!isWordContext"
+                  @click="insertToDoc(item.msg, 'replace')"
+                >
+                  <FileText :size="9" />
+                  <span>Replace</span>
+                </button>
+                <button
+                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Append after selection"
+                  :disabled="!isWordContext"
+                  @click="insertToDoc(item.msg, 'append')"
+                >
+                  <Plus :size="9" />
+                  <span>Append</span>
+                </button>
+                <button
+                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-secondary transition-colors hover:bg-hover hover:text-main"
+                  title="Copy to clipboard"
+                  @click="copyToClipboard(item.msg)"
+                >
+                  <Copy :size="9" />
+                  <span>{{ copiedId === item.msg.id ? 'Copied' : 'Copy' }}</span>
+                </button>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -706,6 +727,7 @@ import {
   Square,
   Sun,
   Upload,
+  Wrench,
   X,
 } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -738,6 +760,13 @@ import {
   type ThreadSummary,
 } from '@/api/threads'
 import { htmlToMarkdown, markdownToHtml } from '@/utils/mdFormatter'
+import toolMap from '@/utils/tool_mapped.json'
+
+function mapped_tc(name: string, field: 'name' | 'desc'): string {
+  const entry = (toolMap as Record<string, { name: string; description: string }>)[name]
+  if (!entry) return field === 'name' ? name : ''
+  return field === 'name' ? entry.name : entry.description
+}
 
 const DRIVE_PROMPT_KEY = 'sprih.drivePromptSeen'
 const showDrivePrompt = ref(localStorage.getItem(DRIVE_PROMPT_KEY) !== 'true')
@@ -900,11 +929,54 @@ const displayMessages = computed(() =>
   }),
 )
 
+type ToolCallEntry = { id: string; name: string; args: Record<string, unknown> }
+interface HumanItem { kind: 'human'; msg: AgentMessage }
+// All tool calls from consecutive AI planning steps + the final text message
+// are merged into one AssistantItem so they render under a single "assistant" label.
+interface AssistantItem { kind: 'assistant'; id: string; calls: ToolCallEntry[]; msg: AgentMessage | null }
+type DisplayItem = HumanItem | AssistantItem
+
+const groupedMessages = computed<DisplayItem[]>(() => {
+  const items: DisplayItem[] = []
+  let pendingCalls: ToolCallEntry[] = []
+  let groupId = ''
+  for (const m of messages.value) {
+    if (m.type === 'human') {
+      if (pendingCalls.length) {
+        items.push({ kind: 'assistant', id: groupId, calls: [...pendingCalls], msg: null })
+        pendingCalls = []
+        groupId = ''
+      }
+      items.push({ kind: 'human', msg: m })
+    } else if (m.type === 'ai') {
+      if (m.tool_calls?.length) {
+        // Planning step: accumulate. The else-if below is intentional — a message
+        // with tool_calls never flushes, so only tool-result messages (skipped) can
+        // sit between consecutive planning steps. Any text-producing AI message or
+        // human message breaks the consecutive chain.
+        if (!groupId) groupId = m.id
+        pendingCalls.push(...m.tool_calls)
+      } else if (getMessageText(m)) {
+        // Text response (no tool_calls): flush all accumulated consecutive tool calls
+        // into the same AssistantItem so they appear under one "assistant" label.
+        items.push({ kind: 'assistant', id: groupId || m.id, calls: [...pendingCalls], msg: m })
+        pendingCalls = []
+        groupId = ''
+      }
+    }
+    // tool/system messages skipped — do NOT break the consecutive chain
+  }
+  if (pendingCalls.length) items.push({ kind: 'assistant', id: groupId, calls: pendingCalls, msg: null })
+  return items
+})
+
 // Last visible AI message is currently streaming if its content is non-empty
 // — used to suppress the "agent is thinking…" line once tokens land.
 const lastIsStreamingAi = computed(() => {
-  const last = displayMessages.value.at(-1)
-  return streaming.value && last?.type === 'ai' && !!last.content
+  if (!streaming.value) return false
+  const last = groupedMessages.value.at(-1)
+  if (!last || last.kind === 'human') return false
+  return !!last.msg?.content
 })
 
 function getMessageText(m: AgentMessage): string {
@@ -1503,6 +1575,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
+details[open] .tool-calls-chevron {
+  transform: rotate(180deg);
+}
+
 /* AI message markdown — compact, dark-mode-tuned. */
 .ai-markdown p {
   margin: 0.15em 0;

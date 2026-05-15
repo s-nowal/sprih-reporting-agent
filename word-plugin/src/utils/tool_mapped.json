@@ -1,0 +1,34 @@
+{
+  "read_file": {
+    "name": "Read File",
+    "description": "Open and inspect file contents"
+  },
+  "write_file": {
+    "name": "Write File",
+    "description": "Create a new file"
+  },
+  "edit_file": {
+    "name": "Edit File",
+    "description": "Modify existing files"
+  },
+  "ls": {
+    "name": "Browse Files",
+    "description": "View folders and files"
+  },
+  "glob": {
+    "name": "Find Files",
+    "description": "Locate files by pattern"
+  },
+  "grep": {
+    "name": "Search Contents",
+    "description": "Search text inside files"
+  },
+  "run_terminal_command": {
+    "name": "Run Terminal",
+    "description": "Execute shell commands"
+  },
+  "task": {
+    "name": "Launch Agent",
+    "description": "Delegate work to a subagent"
+  }
+}
