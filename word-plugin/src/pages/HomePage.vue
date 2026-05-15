@@ -919,54 +919,57 @@ function closeAttachMenu(e: MouseEvent) {
   }
 }
 
-// Hide tool messages and AI messages with no content + no tool calls
-// (the agent emits an empty placeholder before its first stream chunk).
+// Visible messages: human always shown; AI shown when it has real text or tool calls.
+// Uses getMessageText (not !!m.content) so array-typed content is handled correctly.
+// Tool/system messages are excluded — they are never directly rendered.
 const displayMessages = computed(() =>
   messages.value.filter((m) => {
     if (m.type === 'human') return true
-    if (m.type === 'ai') return !!m.content || !!m.tool_calls?.length
+    if (m.type === 'ai') return !!getMessageText(m) || !!m.tool_calls?.length
     return false
   }),
 )
 
 type ToolCallEntry = { id: string; name: string; args: Record<string, unknown> }
 interface HumanItem { kind: 'human'; msg: AgentMessage }
-// All tool calls from consecutive AI planning steps + the final text message
-// are merged into one AssistantItem so they render under a single "assistant" label.
 interface AssistantItem { kind: 'assistant'; id: string; calls: ToolCallEntry[]; msg: AgentMessage | null }
 type DisplayItem = HumanItem | AssistantItem
 
+// Groups consecutive AI planning steps (tool-calls-only) into a single AssistantItem.
+// Operates on displayMessages so tool/system messages are already excluded.
 const groupedMessages = computed<DisplayItem[]>(() => {
   const items: DisplayItem[] = []
   let pendingCalls: ToolCallEntry[] = []
   let groupId = ''
-  for (const m of messages.value) {
+
+  for (const m of displayMessages.value) {
     if (m.type === 'human') {
       if (pendingCalls.length) {
-        items.push({ kind: 'assistant', id: groupId, calls: [...pendingCalls], msg: null })
+        items.push({ kind: 'assistant', id: groupId, calls: pendingCalls, msg: null })
         pendingCalls = []
         groupId = ''
       }
       items.push({ kind: 'human', msg: m })
-    } else if (m.type === 'ai') {
-      if (m.tool_calls?.length) {
-        // Planning step: accumulate. The else-if below is intentional — a message
-        // with tool_calls never flushes, so only tool-result messages (skipped) can
-        // sit between consecutive planning steps. Any text-producing AI message or
-        // human message breaks the consecutive chain.
+    } else {
+      // All non-human messages in displayMessages are type 'ai'.
+      const hasText = !!getMessageText(m)
+      if (m.tool_calls?.length && !hasText) {
+        // Pure planning step — accumulate calls, do not flush.
         if (!groupId) groupId = m.id
-        pendingCalls.push(...m.tool_calls)
-      } else if (getMessageText(m)) {
-        // Text response (no tool_calls): flush all accumulated consecutive tool calls
-        // into the same AssistantItem so they appear under one "assistant" label.
-        items.push({ kind: 'assistant', id: groupId || m.id, calls: [...pendingCalls], msg: m })
+        pendingCalls = [...pendingCalls, ...m.tool_calls]
+      } else {
+        // Text response (with or without tool_calls) — flush pending calls.
+        items.push({ kind: 'assistant', id: groupId || m.id, calls: pendingCalls, msg: m })
         pendingCalls = []
         groupId = ''
       }
     }
-    // tool/system messages skipped — do NOT break the consecutive chain
   }
-  if (pendingCalls.length) items.push({ kind: 'assistant', id: groupId, calls: pendingCalls, msg: null })
+
+  if (pendingCalls.length) {
+    items.push({ kind: 'assistant', id: groupId, calls: pendingCalls, msg: null })
+  }
+
   return items
 })
 
