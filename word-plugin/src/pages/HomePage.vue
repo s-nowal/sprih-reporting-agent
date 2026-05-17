@@ -94,6 +94,25 @@
       </div>
     </div>
 
+    <!-- Parent folder set successfully -->
+    <div
+      v-if="folderIdSuccess"
+      class="absolute inset-0 z-50 flex items-center justify-center bg-black/40"
+    >
+      <div class="mx-4 flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-lg">
+        <span class="text-[13px] font-semibold text-main">Drive folder connected ✓</span>
+        <p class="text-[11px] leading-relaxed text-tertiary">
+          The parent folder has been saved. Thread folders will be created inside it.
+        </p>
+        <button
+          class="self-end rounded bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent transition-colors hover:bg-accent-hover"
+          @click="folderIdSuccess = false"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+
     <div class="relative flex h-full w-full flex-col gap-1 rounded-md">
       <!-- Header -->
       <div
@@ -249,9 +268,18 @@
 
         <!-- Drive folder section -->
         <section class="flex flex-col gap-1">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-tertiary">
-            Drive folder
-          </span>
+          <div class="flex items-center gap-1">
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-tertiary">
+              Drive folder
+            </span>
+            <button
+              class="flex items-center justify-center text-tertiary transition-colors hover:text-secondary"
+              title="Re-connect Google Drive"
+              @click="showDrivePrompt = true"
+            >
+              <Paperclip :size="10" />
+            </button>
+          </div>
 
           <div v-if="mirrorBusy" class="text-[11px] italic text-tertiary">
             Loading…
@@ -821,12 +849,15 @@ function onFolderIdOk() {
   handleFolderId(id)
 }
 
+const folderIdSuccess = ref(false)
+
 async function handleFolderId(folderId: string) {
-  await fetch(`${BASE_URL}/auth/google/parent-folder`, {
+  const res = await fetch(`${BASE_URL}/auth/google/parent-folder`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ drive_parent_folder_id: folderId }),
   })
+  if (res.ok) folderIdSuccess.value = true
 }
 
 const THREAD_KEY = 'sprih.threadId'

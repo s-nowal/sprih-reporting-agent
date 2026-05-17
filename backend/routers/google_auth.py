@@ -52,6 +52,25 @@ GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 PROVIDER_KEY = "google_drive"
 
 
+def _redirect_uri(request: Request) -> str:
+    """Return the OAuth redirect URI for this request.
+
+    Uses ``SPRIH_GOOGLE_OAUTH_REDIRECT_URI`` when set (needed behind a reverse
+    proxy). Falls back to deriving the URI from the request's base URL so the
+    server works on localhost and any deployed address without extra config.
+
+    Args:
+        request: The current FastAPI request.
+
+    Returns:
+        Absolute redirect URI string registered with Google.
+    """
+    if settings.google_oauth_redirect_uri:
+        return settings.google_oauth_redirect_uri
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/auth/google/callback"
+
+
 def _require_oauth_settings() -> None:
     """Raise 503 if the OAuth client isn't configured.
 
@@ -95,6 +114,7 @@ async def _google_status(enterprise_id: str) -> StatusResponse:
 
 @router.get("/start", response_model=StartAuthResponse)
 async def start(
+    request: Request,
     enterprise: EnterpriseContext = Depends(get_enterprise_context),
 ) -> StartAuthResponse:
     """Return the Google consent URL the operator should open in a browser.
@@ -103,6 +123,7 @@ async def start(
     can persist the refresh token against the right tenant.
 
     Args:
+        request: Current request (used to derive the redirect URI).
         enterprise: Caller's enterprise context.
 
     Returns:
@@ -112,9 +133,12 @@ async def start(
     """
     _require_oauth_settings()
 
+    # Clear any stale credentials so the callback always writes a fresh row.
+    await mirror.credentials.clear(enterprise.enterprise_id, PROVIDER_KEY)
+
     params = {
         "client_id": settings.google_oauth_client_id,
-        "redirect_uri": settings.google_oauth_redirect_uri,
+        "redirect_uri": _redirect_uri(request),
         "response_type": "code",
         "scope": " ".join(DRIVE_SCOPES),
         # access_type=offline + prompt=consent guarantees Google issues a
@@ -176,7 +200,7 @@ async def callback(request: Request) -> HTMLResponse:
                 "code": code,
                 "client_id": settings.google_oauth_client_id,
                 "client_secret": settings.google_oauth_client_secret,
-                "redirect_uri": settings.google_oauth_redirect_uri,
+                "redirect_uri": _redirect_uri(request),
                 "grant_type": "authorization_code",
             },
         )

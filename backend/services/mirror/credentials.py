@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
 from backend.infra.registry import get_db
 from backend.models.mirror_credentials import MirrorCredentials
@@ -114,10 +114,13 @@ async def set_parent_folder(
 ) -> bool:
     """Update only the ``parent_folder_id`` for one (enterprise, provider).
 
+    Uses an explicit UPDATE statement (not ORM fetch-then-modify) so the
+    write always reaches the DB regardless of SQLAlchemy's dirty-tracking.
+
     Args:
         enterprise_id: Tenant id.
         provider: Provider key.
-        parent_folder_id: New parent folder id.
+        parent_folder_id: New parent folder id to overwrite whatever is stored.
 
     Returns:
         ``True`` if a row was updated, ``False`` if no credentials exist
@@ -125,12 +128,37 @@ async def set_parent_folder(
     """
     db = get_db()
     async with db() as session:
-        row = await session.get(MirrorCredentials, (enterprise_id, provider))
-        if row is None:
-            return False
-        row.parent_folder_id = parent_folder_id
+        result = await session.execute(
+            update(MirrorCredentials)
+            .where(
+                MirrorCredentials.enterprise_id == enterprise_id,
+                MirrorCredentials.provider == provider,
+            )
+            .values(parent_folder_id=parent_folder_id)
+        )
         await session.commit()
-        return True
+        return result.rowcount > 0
+
+
+async def clear(enterprise_id: str, provider: str) -> None:
+    """Delete all credentials for one (enterprise, provider).
+
+    Called when the OAuth flow is restarted so any stale token and folder
+    mapping are removed before the fresh grant is persisted by the callback.
+
+    Args:
+        enterprise_id: Tenant id.
+        provider: Provider key (``"google_drive"`` etc.).
+    """
+    db = get_db()
+    async with db() as session:
+        await session.execute(
+            delete(MirrorCredentials).where(
+                MirrorCredentials.enterprise_id == enterprise_id,
+                MirrorCredentials.provider == provider,
+            )
+        )
+        await session.commit()
 
 
 async def get_status(enterprise_id: str) -> dict[str, Any]:

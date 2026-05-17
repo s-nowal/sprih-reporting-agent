@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     # and the resulting refresh token is stored per enterprise.
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
-    google_oauth_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+    # Leave empty to auto-derive from the incoming request's base URL at
+    # runtime. Set explicitly when the server is behind a reverse proxy that
+    # changes the apparent host (e.g. SPRIH_GOOGLE_OAUTH_REDIRECT_URI=https://api.sprih.com/auth/google/callback).
+    google_oauth_redirect_uri: str = ""
 
     # Per-agent mirror policy: which workspace subdirectories sync to Drive.
     # Keys are graph names (assistant_id), values are subdir names. Anything
