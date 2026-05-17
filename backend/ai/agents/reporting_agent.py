@@ -27,7 +27,7 @@ from deepagents.backends.protocol import BackendProtocol, EditResult, WriteResul
 from langchain.chat_models import init_chat_model
 
 from backend.ai.agents.research_agent import build_research_graph
-from backend.ai.prompts.agents.reporting import REPORTING_SYSTEM_PROMPT
+from backend.ai.prompts.agents.reporting import get_reporting_prompt
 from backend.ai.tools.user_input import request_user_input
 from backend.ai.tools.terminal_tools import run_terminal_command
 from backend.infra.registry import get_storage
@@ -132,6 +132,7 @@ class _PolicyWrapper:
 def build_reporting_graph(
     workspace_prefix: str,
     checkpointer: BaseCheckpointSaver | None = None,
+    client_type: str = "browser",
 ):
     """Build and return the compiled reporting agent graph.
 
@@ -149,6 +150,8 @@ def build_reporting_graph(
         checkpointer: Shared checkpointer for thread-scoped state persistence.
             Pass the same instance across all runs so the LLM sees the full
             conversation history on each turn.
+        client_type: ``"word"`` for the Word add-in, ``"browser"`` (default)
+            for the standard web UI. Selects the appropriate system prompt.
 
     Returns:
         A compiled LangGraph ``StateGraph`` ready for ``ainvoke`` / ``astream``.
@@ -199,5 +202,5 @@ def build_reporting_graph(
         tools=[run_terminal_command],
         skills=["/skills/"],
         checkpointer=checkpointer,
-        system_prompt=REPORTING_SYSTEM_PROMPT,
+        system_prompt=get_reporting_prompt(client_type),
     )

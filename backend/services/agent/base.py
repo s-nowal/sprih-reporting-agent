@@ -15,7 +15,12 @@ class AgentService:
     """
 
     async def run(
-        self, graph_name: str, thread_id: str, input_data: dict[str, Any]
+        self,
+        graph_name: str,
+        thread_id: str,
+        input_data: dict[str, Any],
+        *,
+        client_type: str = "browser",
     ) -> dict[str, Any]:
         """Invoke an agent graph and return the final state.
 
@@ -23,6 +28,7 @@ class AgentService:
             graph_name: Registered agent name (e.g. ``"research-agent"``).
             thread_id: Conversation thread for checkpointer state.
             input_data: Message dict (``{"messages": [...]}``)
+            client_type: ``"word"`` or ``"browser"`` — selects the system prompt.
 
         Returns:
             Final state dict from the graph.
@@ -33,7 +39,12 @@ class AgentService:
         raise NotImplementedError
 
     async def stream(
-        self, graph_name: str, thread_id: str, input_data: dict[str, Any]
+        self,
+        graph_name: str,
+        thread_id: str,
+        input_data: dict[str, Any],
+        *,
+        client_type: str = "browser",
     ) -> AsyncGenerator[dict, None]:
         """Stream agent execution, yielding state after each step.
 
@@ -41,6 +52,7 @@ class AgentService:
             graph_name: Registered agent name.
             thread_id: Conversation thread for checkpointer state.
             input_data: Message dict (``{"messages": [...]}``)
+            client_type: ``"word"`` or ``"browser"`` — selects the system prompt.
 
         Yields:
             State dicts — one per graph step.
@@ -52,7 +64,12 @@ class AgentService:
         yield  # noqa: unreachable — makes this a generator
 
     async def resume(
-        self, graph_name: str, thread_id: str, value: Any
+        self,
+        graph_name: str,
+        thread_id: str,
+        value: Any,
+        *,
+        client_type: str = "browser",
     ) -> dict[str, Any]:
         """Resume a graph from an interrupt with the given value.
 
@@ -60,6 +77,7 @@ class AgentService:
             graph_name: Registered agent name.
             thread_id: Conversation thread to resume.
             value: The user's response to the interrupt prompt.
+            client_type: ``"word"`` or ``"browser"`` — selects the system prompt.
 
         Returns:
             Final state dict from the resumed graph.

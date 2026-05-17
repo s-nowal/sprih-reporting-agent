@@ -56,7 +56,11 @@ class LangGraphAgentService(AgentService):
         )
 
     def _get_graph(
-        self, graph_name: str, *, workspace_prefix: str | None = None
+        self,
+        graph_name: str,
+        *,
+        workspace_prefix: str | None = None,
+        client_type: str = "browser",
     ) -> Any:
         """Return the compiled graph for ``graph_name``.
 
@@ -69,6 +73,8 @@ class LangGraphAgentService(AgentService):
             workspace_prefix: Required for workspace-dependent graphs
                 (e.g. ``"reporting-agent"``). Storage key prefix that
                 scopes the agent's file operations.
+            client_type: ``"word"`` or ``"browser"`` — forwarded to
+                ``build_reporting_graph`` to select the system prompt.
 
         Returns:
             The compiled LangGraph ``StateGraph``.
@@ -85,7 +91,9 @@ class LangGraphAgentService(AgentService):
                     f"Pass it via the workspace_prefix parameter."
                 )
             if graph_name == "reporting-agent":
-                return build_reporting_graph(workspace_prefix, self._checkpointer)
+                return build_reporting_graph(
+                    workspace_prefix, self._checkpointer, client_type
+                )
             raise ValueError(f"No builder for workspace graph {graph_name!r}")
 
         # --- Cached graphs: built once at startup ----------------------------
@@ -108,6 +116,7 @@ class LangGraphAgentService(AgentService):
         enterprise_id: str,
         job_id: str | None = None,
         workspace_prefix: str | None = None,
+        client_type: str = "browser",
     ) -> dict[str, Any]:
         """Invoke the graph and return the final state (non-streaming).
 
@@ -119,6 +128,7 @@ class LangGraphAgentService(AgentService):
             job_id: Job id injected into tool config for provenance.
             workspace_prefix: Storage key prefix for the agent's workspace.
                 Required for workspace-dependent graphs (e.g. ``"reporting-agent"``).
+            client_type: ``"word"`` or ``"browser"`` — selects the system prompt.
 
         Returns:
             The final state dict from the graph (``{"messages": [...]}``)
@@ -126,7 +136,9 @@ class LangGraphAgentService(AgentService):
         Raises:
             ValueError: If ``graph_name`` is not registered.
         """
-        graph = self._get_graph(graph_name, workspace_prefix=workspace_prefix)
+        graph = self._get_graph(
+            graph_name, workspace_prefix=workspace_prefix, client_type=client_type
+        )
         config = self._make_config(thread_id, enterprise_id, job_id)
         return await graph.ainvoke(input_data, config)
 
@@ -140,6 +152,7 @@ class LangGraphAgentService(AgentService):
         job_id: str | None = None,
         command: dict[str, Any] | None = None,
         workspace_prefix: str | None = None,
+        client_type: str = "browser",
     ) -> AsyncGenerator[dict, None]:
         """Stream agent execution, yielding full state after each graph step.
 
@@ -160,6 +173,7 @@ class LangGraphAgentService(AgentService):
                 ``input_data`` is ignored and a ``Command`` is sent instead.
             workspace_prefix: Storage key prefix for the agent's workspace.
                 Required for workspace-dependent graphs (e.g. ``"reporting-agent"``).
+            client_type: ``"word"`` or ``"browser"`` — selects the system prompt.
 
         Yields:
             State dicts (``{"messages": [...]}``) — one per graph step.
@@ -167,7 +181,9 @@ class LangGraphAgentService(AgentService):
         Raises:
             ValueError: If ``graph_name`` is not registered.
         """
-        graph = self._get_graph(graph_name, workspace_prefix=workspace_prefix)
+        graph = self._get_graph(
+            graph_name, workspace_prefix=workspace_prefix, client_type=client_type
+        )
         config = self._make_config(thread_id, enterprise_id, job_id)
 
         agent_input: Any
@@ -188,6 +204,7 @@ class LangGraphAgentService(AgentService):
         enterprise_id: str,
         job_id: str | None = None,
         workspace_prefix: str | None = None,
+        client_type: str = "browser",
     ) -> dict[str, Any]:
         """Resume a graph from an interrupt with the given value.
 
@@ -198,11 +215,14 @@ class LangGraphAgentService(AgentService):
             enterprise_id: Tenant id injected into tool config.
             job_id: Job id injected into tool config.
             workspace_prefix: Storage key prefix for the agent's workspace.
+            client_type: ``"word"`` or ``"browser"`` — selects the system prompt.
 
         Returns:
             The final state dict from the resumed graph.
         """
-        graph = self._get_graph(graph_name, workspace_prefix=workspace_prefix)
+        graph = self._get_graph(
+            graph_name, workspace_prefix=workspace_prefix, client_type=client_type
+        )
         config = self._make_config(thread_id, enterprise_id, job_id)
         return await graph.ainvoke(Command(resume=value), config)
 

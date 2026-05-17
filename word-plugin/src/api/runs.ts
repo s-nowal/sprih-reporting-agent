@@ -25,6 +25,7 @@ export interface StreamRunOptions {
   threadId: string
   message: string
   assistantId?: string
+  clientType?: 'browser' | 'word'
   signal?: AbortSignal
 }
 
@@ -35,6 +36,7 @@ export async function* streamRun(
     assistant_id: opts.assistantId ?? 'reporting-agent',
     input: { messages: [{ type: 'human', content: opts.message }] },
     stream_mode: 'values',
+    config: { client_type: opts.clientType ?? 'browser' },
   }
 
   const res = await apiStream(

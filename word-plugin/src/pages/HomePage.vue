@@ -1126,6 +1126,12 @@ async function onSubmit() {
   // --- Compose the outgoing message ---------------------------------------
   let text = buildMessageWithFileReferences(typed, uploaded)
   if (didSync) text = text ? `${text}\n\n${SYNC_SUFFIX}` : SYNC_SUFFIX
+  const selectedText = selectedTextPreview.value
+  if (selectedText) {
+    text = text ? `${text}\n\nSelected Text: ${selectedText}` : `Selected Text: ${selectedText}`
+    selectedTextPreview.value = ''
+    dismissedSelectedText.value = ''
+  }
 
   // Optimistic: render the user's message immediately. The first `values`
   // event from the backend will replace the whole list with canonical state.
@@ -1139,6 +1145,7 @@ async function onSubmit() {
     for await (const evt of streamRun({
       threadId: tid,
       message: text,
+      clientType: isWordContext.value ? 'word' : 'browser',
       signal: abortController.value.signal,
     })) {
       if (evt.event === 'values') {

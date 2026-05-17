@@ -243,6 +243,8 @@ async def stream_run(
         command = data.command
         input_data = None
 
+    client_type = (data.config or {}).get("client_type", "browser")
+
     last_state: dict | None = None
 
     try:
@@ -254,6 +256,7 @@ async def stream_run(
             job_id=job_id,
             command=command,
             workspace_prefix=workspace_prefix,
+            client_type=client_type,
         ):
             last_state = state
             messages = _serialize_messages(state.get("messages", []))
