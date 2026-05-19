@@ -3,7 +3,7 @@ FROM node:22-alpine AS frontend-build
 WORKDIR /app
 
 COPY word-plugin/package.json word-plugin/package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY word-plugin/ .
 RUN npm run build
@@ -15,7 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
         supervisor \
         curl \
-    && rm -rf /var/lib/apt/lists/*
+        openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && openssl req -x509 -nodes -days 3650 \
+         -newkey rsa:2048 \
+         -keyout /etc/ssl/private/sprih-selfsigned.key \
+         -out /etc/ssl/certs/sprih-selfsigned.crt \
+         -subj "/CN=35.237.42.99" \
+         -addext "subjectAltName=IP:35.237.42.99"
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -43,6 +50,6 @@ COPY docker/nginx.conf /etc/nginx/sites-available/default
 RUN mkdir -p /var/log/supervisor
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 80 8000
+EXPOSE 80 443 8000
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -1,0 +1,224 @@
+[
+  {
+    "tc_name": "ls",
+    "tc_params": [
+      {
+        "field": "path",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": false,
+        "description": "Absolute path to the directory to list. Must be absolute, not relative."
+      }
+    ]
+  },
+  {
+    "tc_name": "read_file",
+    "tc_params": [
+      {
+        "field": "file_path",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": false,
+        "description": "Absolute path to the file to read. Must be absolute, not relative."
+      },
+      {
+        "field": "offset",
+        "type": "int",
+        "required": false,
+        "default": 0,
+        "truncate": false,
+        "description": "Line number to start reading from (0-indexed). Use for pagination of large files."
+      },
+      {
+        "field": "limit",
+        "type": "int",
+        "required": false,
+        "default": 100,
+        "truncate": false,
+        "description": "Maximum number of lines to read. Use for pagination of large files."
+      }
+    ]
+  },
+  {
+    "tc_name": "write_file",
+    "tc_params": [
+      {
+        "field": "file_path",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": false,
+        "description": "Absolute path where the file should be created. Must be absolute, not relative."
+      },
+      {
+        "field": "content",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": true,
+        "description": "The text content to write to the file."
+      }
+    ]
+  },
+  {
+    "tc_name": "edit_file",
+    "tc_params": [
+      {
+        "field": "file_path",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": false,
+        "description": "Absolute path to the file to edit. Must be absolute, not relative."
+      },
+      {
+        "field": "old_string",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": true,
+        "description": "The exact text to find and replace. Must be unique in the file unless replace_all is true."
+      },
+      {
+        "field": "new_string",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": true,
+        "description": "The text to replace old_string with. Must be different from old_string."
+      },
+      {
+        "field": "replace_all",
+        "type": "bool",
+        "required": false,
+        "default": false,
+        "truncate": false,
+        "description": "If true, replace all occurrences of old_string. If false, old_string must be unique."
+      }
+    ]
+  },
+  {
+    "tc_name": "glob",
+    "tc_params": [
+      {
+        "field": "pattern",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": false,
+        "description": "Glob pattern to match files (e.g., '**/*.py', '*.txt', '/subdir/**/*.md')."
+      },
+      {
+        "field": "path",
+        "type": "str",
+        "required": false,
+        "default": "/",
+        "truncate": false,
+        "description": "Base directory to search from. Defaults to root '/'."
+      }
+    ]
+  },
+  {
+    "tc_name": "grep",
+    "tc_params": [
+      {
+        "field": "pattern",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": false,
+        "description": "Text pattern to search for (literal string, not regex)."
+      },
+      {
+        "field": "path",
+        "type": "str | null",
+        "required": false,
+        "default": null,
+        "truncate": false,
+        "description": "Directory to search in. Defaults to current working directory."
+      },
+      {
+        "field": "glob",
+        "type": "str | null",
+        "required": false,
+        "default": null,
+        "truncate": false,
+        "description": "Glob pattern to filter which files to search (e.g., '*.py')."
+      },
+      {
+        "field": "output_mode",
+        "type": "enum",
+        "enum_values": ["files_with_matches", "content", "count"],
+        "required": false,
+        "default": "files_with_matches",
+        "truncate": false,
+        "description": "Output format: files_with_matches = file paths only; content = matching lines with context; count = match counts per file."
+      }
+    ]
+  },
+  {
+    "tc_name": "run_terminal_command",
+    "tc_params": [
+      {
+        "field": "command",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": true,
+        "description": "Shell command to run."
+      },
+      {
+        "field": "wait",
+        "type": "int",
+        "required": false,
+        "default": 300,
+        "truncate": false,
+        "description": "Max seconds to wait for the command to finish."
+      }
+    ]
+  },
+  {
+    "tc_name": "compile_results",
+    "tc_params": [
+      {
+        "field": "section_dir",
+        "type": "str",
+        "required": false,
+        "default": "workspace/sections",
+        "truncate": false,
+        "description": "Workspace-relative path to the directory containing section markdown files."
+      },
+      {
+        "field": "output_path",
+        "type": "str",
+        "required": false,
+        "default": "workspace",
+        "truncate": false,
+        "description": "Relative directory where the three output files are written."
+      }
+    ]
+  },
+  {
+    "tc_name": "task",
+    "tc_params": [
+      {
+        "field": "subagent_type",
+        "type": "str",
+        "required": true,
+        "default": null,
+        "truncate": false,
+        "description": "Name of subagent launched."
+      },
+      {
+        "field": "description",
+        "type": "str",
+        "required": false,
+        "default": null,
+        "truncate": true,
+        "description": "Prompt of the subagent."
+      }
+    ]
+  }
+]

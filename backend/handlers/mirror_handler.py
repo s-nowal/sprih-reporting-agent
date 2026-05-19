@@ -22,6 +22,7 @@ import asyncio
 import logging
 
 from fastapi import HTTPException
+from googleapiclient.errors import HttpError as DriveHttpError
 
 from backend.handlers.thread_handler import _assert_ownership
 from backend.schemas.mirror import (
@@ -141,12 +142,23 @@ async def link(
         # Drop the broken mapping so setup_thread_folder will re-create.
         await _delete_mapping(thread_id)
 
-    thread = await provider.setup_thread_folder(
-        enterprise_id=enterprise.enterprise_id,
-        thread_id=thread_id,
-        agent_name=body.agent_name,
-        folder_name=body.folder_name,
-    )
+    try:
+        thread = await provider.setup_thread_folder(
+            enterprise_id=enterprise.enterprise_id,
+            thread_id=thread_id,
+            agent_name=body.agent_name,
+            folder_name=body.folder_name,
+        )
+    except DriveHttpError as exc:
+        if exc.resp.status == 404:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Parent Drive folder not found. "
+                    "Check that the folder ID is correct and the account has access."
+                ),
+            ) from exc
+        raise HTTPException(status_code=502, detail=f"Drive API error: {exc.reason}") from exc
     if thread is None:
         # Either the parent folder isn't configured (412 already
         # checked) or the thread row vanished mid-flight.
@@ -154,6 +166,20 @@ async def link(
 
     mapping = await _get_mapping(thread_id)
     assert mapping is not None  # setup just wrote it
+
+    # Push any existing workspace files into the freshly created folder so
+    # the user sees them immediately without waiting for the next agent run.
+    async def _background_sync() -> None:
+        try:
+            pushed = await provider.sync_out(
+                enterprise.enterprise_id, thread_id, body.agent_name
+            )
+            logger.info("post-link sync_out pushed %d file(s) for thread %s", pushed, thread_id)
+        except Exception:
+            logger.exception("post-link sync_out failed for thread %s", thread_id)
+
+    asyncio.create_task(_background_sync())
+
     return MirrorLinkResponse(
         provider=mapping.provider,
         folder_id=mapping.folder_id,

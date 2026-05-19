@@ -420,8 +420,52 @@
 
             <!-- Human message bubble -->
             <template v-if="item.kind === 'human'">
-              <div class="rounded-sm border border-accent/20 bg-accent/5 px-2 py-1.5 text-[12px] leading-relaxed text-main whitespace-pre-wrap wrap-break-word">
-                {{ getMessageText(item.msg).trim() }}
+              <div class="flex flex-col items-end gap-1">
+                <!-- Attachment chips mirroring the pre-send input UI -->
+                <div
+                  v-if="humanCtx(item.msg)?.files.length || humanCtx(item.msg)?.synced || humanCtx(item.msg)?.selectedText"
+                  class="flex flex-wrap justify-end gap-1"
+                >
+                  <div
+                    v-for="(fname, i) in (humanCtx(item.msg)?.files ?? [])"
+                    :key="i"
+                    class="flex max-w-[180px] items-center gap-1.5 rounded border border-border bg-bg-tertiary px-2 py-1"
+                  >
+                    <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-accent/15">
+                      <FileText :size="11" class="text-accent" />
+                    </div>
+                    <div class="flex min-w-0 flex-col leading-tight">
+                      <span class="truncate text-[10px] font-medium text-main" :title="fname">{{ fname }}</span>
+                      <span class="text-[9px] font-semibold uppercase tracking-wider text-tertiary">{{ getFileExt(fname) }}</span>
+                    </div>
+                  </div>
+                  <div
+                    v-if="humanCtx(item.msg)?.synced"
+                    class="flex max-w-[200px] items-center gap-1.5 rounded border border-accent/30 bg-accent/5 px-2 py-1"
+                  >
+                    <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-accent/15">
+                      <EllipsisVertical :size="11" class="text-accent" />
+                    </div>
+                    <div class="flex min-w-0 flex-col leading-tight">
+                      <span class="truncate text-[10px] font-medium text-main">{{ SYNC_PATH }}</span>
+                      <span class="text-[9px] font-semibold uppercase tracking-wider text-accent/70">Synced</span>
+                    </div>
+                  </div>
+                  <div
+                    v-if="humanCtx(item.msg)?.selectedText"
+                    class="flex items-start gap-1.5 rounded border border-border bg-bg-tertiary px-2 py-1.5"
+                  >
+                    <CornerDownRight :size="10" class="mt-0.5 shrink-0 text-tertiary" />
+                    <span class="max-w-[150px] truncate text-[11px] italic leading-relaxed text-tertiary">"{{ humanCtx(item.msg)?.selectedText }}"</span>
+                  </div>
+                </div>
+                <!-- Typed text bubble (omitted when the user sent context only) -->
+                <div
+                  v-if="(humanCtx(item.msg)?.displayText ?? getMessageText(item.msg)).trim()"
+                  class="rounded-sm border border-accent/20 bg-accent/5 px-2 py-1.5 text-[12px] leading-relaxed text-main whitespace-pre-wrap wrap-break-word"
+                >
+                  {{ (humanCtx(item.msg)?.displayText ?? getMessageText(item.msg)).trim() }}
+                </div>
               </div>
             </template>
 
@@ -452,19 +496,40 @@
                   <div
                     v-for="tc in item.calls"
                     :key="tc.id"
-                    class="relative flex items-center gap-2.5 px-2.5 py-2"
+                    class="relative flex flex-col"
                   >
                     <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-accent/40" />
-                    <div class="flex-shrink-0 w-6 h-6 rounded-md bg-accent/10 flex items-center justify-center text-accent">
-                      <Wrench :size="12" />
+                    <div
+                      class="flex items-center gap-2.5 px-2.5 py-2 cursor-pointer hover:bg-hover transition-colors"
+                      @click="toggleToolCallArgs(tc.id)"
+                    >
+                      <div class="flex-shrink-0 w-6 h-6 rounded-md bg-accent/10 flex items-center justify-center text-accent">
+                        <Wrench :size="12" />
+                      </div>
+                      <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+                        <span class="text-[11px] font-medium text-main font-mono truncate">
+                          {{ mapped_tc(tc.name, 'name') }}
+                        </span>
+                        <span class="text-[10px] text-tertiary truncate">
+                          {{ mapped_tc(tc.name, 'desc') }}
+                        </span>
+                      </div>
                     </div>
-                    <div class="flex-1 min-w-0 flex flex-col gap-0.5">
-                      <span class="text-[11px] font-medium text-main font-mono truncate">
-                        {{ mapped_tc(tc.name, 'name') }}
-                      </span>
-                      <span class="text-[10px] text-tertiary truncate">
-                        {{ mapped_tc(tc.name, 'desc') }}
-                      </span>
+                    <div
+                      v-if="expandedToolCalls[tc.id]"
+                      class="pl-11 pr-2.5 pb-2 pt-1.5 flex flex-col gap-1.5 border-t border-border"
+                    >
+                      <template v-if="toolCallArgs(tc.name, tc.args).length">
+                        <div
+                          v-for="arg in toolCallArgs(tc.name, tc.args)"
+                          :key="arg.field"
+                          class="flex items-baseline gap-1.5 min-w-0"
+                        >
+                          <span class="flex-shrink-0 text-[9px] font-semibold font-mono uppercase tracking-wider text-secondary">{{ arg.field }}</span>
+                          <span class="text-[10px] text-tertiary" :class="arg.truncate ? 'truncate' : ''">{{ arg.value }}</span>
+                        </div>
+                      </template>
+                      <span v-else class="text-[10px] italic text-tertiary">No args</span>
                     </div>
                   </div>
                 </div>
@@ -758,7 +823,7 @@ import {
   Wrench,
   X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import { insertFormattedResult } from '@/api/common'
 import { BASE_URL } from '@/api/config'
@@ -788,12 +853,37 @@ import {
   type ThreadSummary,
 } from '@/api/threads'
 import { htmlToMarkdown, markdownToHtml } from '@/utils/mdFormatter'
-import toolMap from '@/utils/tool_mapped.json'
+import toolMap from '@/mappings/tool_mapped.json'
+import toolArgsMap from '@/mappings/tool_args_mapped.json'
 
 function mapped_tc(name: string, field: 'name' | 'desc'): string {
   const entry = (toolMap as Record<string, { name: string; description: string }>)[name]
   if (!entry) return field === 'name' ? name : ''
   return field === 'name' ? entry.name : entry.description
+}
+
+const expandedToolCalls = reactive<Record<string, boolean>>({})
+
+function toggleToolCallArgs(id: string) {
+  expandedToolCalls[id] = !expandedToolCalls[id]
+}
+
+type ArgEntry = { field: string; value: string; truncate: boolean }
+
+function toolCallArgs(name: string, args: Record<string, unknown>): ArgEntry[] {
+  const entry = (
+    toolArgsMap as Array<{ tc_name: string; tc_params: Array<{ field: string; truncate?: boolean }> }>
+  ).find((e) => e.tc_name === name)
+  const paramMap = entry
+    ? new Map(entry.tc_params.map((p) => [p.field, p.truncate ?? false]))
+    : null
+  return Object.entries(args)
+    .filter(([k]) => !paramMap || paramMap.has(k))
+    .map(([k, v]) => ({
+      field: k,
+      value: typeof v === 'string' ? v : JSON.stringify(v),
+      truncate: paramMap?.get(k) ?? false,
+    }))
 }
 
 const DRIVE_PROMPT_KEY = 'sprih.drivePromptSeen'
@@ -944,6 +1034,16 @@ const attachMenuOpen = ref(false)
 const attachMenuRef = ref<HTMLElement | null>(null)
 const isWordContext = ref(false)
 
+// Per-message context for human bubbles sent this session.
+// Separates what the user typed from the internal backend-facing suffixes.
+interface HumanMsgContext {
+  displayText: string
+  files: string[]
+  synced: boolean
+  selectedText: string
+}
+const humanMsgContext = reactive<Record<string, HumanMsgContext>>({})
+
 function closeAttachMenu(e: MouseEvent) {
   if (attachMenuRef.value && !attachMenuRef.value.contains(e.target as Node)) {
     attachMenuOpen.value = false
@@ -1031,6 +1131,10 @@ function cleanText(m: AgentMessage): string {
   return getMessageText(m).replace(re, '').trim()
 }
 
+function humanCtx(m: AgentMessage): HumanMsgContext | null {
+  return humanMsgContext[getMessageText(m)] ?? null
+}
+
 // Split AI content into [text, think, text, …] segments so we can render
 // `<think>…</think>` blocks as collapsibles instead of dumping them in the
 // bubble. Anthropic models don't emit these, but we keep the splitter for
@@ -1065,10 +1169,6 @@ function renderSegments(m: AgentMessage): RenderSegment[] {
   return segments.filter((s) => s.text)
 }
 
-function briefArgs(args: Record<string, unknown>): string {
-  const s = JSON.stringify(args)
-  return s.length > 60 ? s.slice(0, 57) + '…' : s
-}
 
 async function ensureThread(): Promise<string> {
   if (threadId.value) return threadId.value
@@ -1162,6 +1262,15 @@ async function onSubmit() {
     text = text ? `${text}\n\nSelected Text: ${selectedText}` : `Selected Text: ${selectedText}`
     selectedTextPreview.value = ''
     dismissedSelectedText.value = ''
+  }
+
+  // Store bubble context — typed text + attachment metadata — keyed by the
+  // full backend message so both the optimistic and canonical bubbles resolve it.
+  humanMsgContext[text] = {
+    displayText: typed,
+    files: uploaded.map((u) => u.key.split('/').pop() ?? u.key),
+    synced: didSync,
+    selectedText,
   }
 
   // Optimistic: render the user's message immediately. The first `values`
@@ -1444,7 +1553,6 @@ async function linkFolder(ifBroken = false) {
   } catch (e) {
     mirrorError.value =
       e instanceof Error ? e.message : `Link failed: ${String(e)}`
-    showFolderIdPrompt.value = true
   } finally {
     mirrorBusy.value = false
   }

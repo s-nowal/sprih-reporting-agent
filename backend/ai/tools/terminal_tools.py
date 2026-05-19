@@ -75,17 +75,17 @@ async def _sync_to_container(config: RunnableConfig) -> dict:
     Enumerates every object under the thread's workspace prefix via the storage
     adapter and POSTs each one to ``/files/upload``, preserving the relative
     folder structure under the thread-scoped container workdir
-    (``{_CONTAINER_BASE}/{thread_id}``). Tracks which container directories
-    were populated so the caller can scope the sync-back to those same dirs.
+    (``{_CONTAINER_BASE}/{thread_id}``).
 
     Args:
         config: LangGraph runnable config carrying ``thread_id``.
 
     Returns:
         Dict with ``uploaded`` (list of relative paths), ``failed``
-        (list of ``{path, error}`` dicts), ``container_dirs`` (sorted list
-        of container directory paths that received at least one file), and
-        ``workdir`` (the thread's container working directory).
+        (list of ``{path, error}`` dicts), ``container_dirs`` (always
+        ``[workdir]`` — the full thread workdir — so sync-out discovers any
+        directory the agent creates, not just those that received an upload),
+        and ``workdir`` (the thread's container working directory).
         Returns ``{"error": ...}`` if the thread is not found.
     """
     thread_id: str = config["configurable"]["thread_id"]
@@ -94,18 +94,38 @@ async def _sync_to_container(config: RunnableConfig) -> dict:
         return {"error": f"thread '{thread_id}' not found"}
 
     workdir = _thread_workdir(thread_id)
+
+    # --- Evict stale workdirs from previous/timed-out sessions ---
+    # Any sibling dir under _CONTAINER_BASE that isn't this thread's workdir is
+    # a leftover from a session that didn't reach its flush (e.g. timed-out
+    # command). Clean them up before uploading so the agent sees only its own files.
+    container_base = _CONTAINER_BASE.rstrip("/")
+    try:
+        requests.post(
+            f"{BASE_URL}/execute",
+            headers=_AUTH_HEADERS,
+            params={"wait": 10},
+            json={
+                "command": (
+                    f"find '{container_base}' -mindepth 1 -maxdepth 1"
+                    f" ! -name '{thread_id}' -exec rm -rf {{}} \\; 2>/dev/null; true"
+                )
+            },
+            timeout=15,
+        )
+    except Exception:
+        pass  # non-fatal
+
     storage = get_storage()
     objects = storage.list_objects(prefix)
 
     uploaded: list[str] = []
     failed: list[dict] = []
-    container_dirs: set[str] = set()
 
     for obj in objects:
         key: str = obj["key"]
         rel_path = key[len(prefix):].lstrip("/")
         remote_dir = str(PurePosixPath(workdir) / Path(rel_path).parent.as_posix())
-        container_dirs.add(remote_dir)
         try:
             content = storage.read(key)
             response = requests.post(
@@ -124,7 +144,10 @@ async def _sync_to_container(config: RunnableConfig) -> dict:
     return {
         "uploaded": uploaded,
         "failed": failed,
-        "container_dirs": sorted(container_dirs),
+        # Always scan the full thread workdir on sync-out so that agent-created
+        # directories (e.g. output/) are discovered even if nothing was uploaded
+        # there before the run.
+        "container_dirs": [workdir],
         "workdir": workdir,
     }
 
@@ -193,24 +216,35 @@ async def _sync_from_container(
             continue
         if skip_rel_paths and rel_path in skip_rel_paths:
             continue
+        storage_key = f"{prefix}/{rel_path}"
+        is_binary = Path(rel_path).suffix.lower() in _BINARY_EXTENSIONS
         try:
-            file_resp = requests.get(
-                f"{BASE_URL}/files/read",
-                headers=_AUTH_HEADERS,
-                params={"path": abs_path},
-                timeout=60,
-            )
-            file_resp.raise_for_status()
-            data = file_resp.json()
-            content = data.get("content", "")
-            storage_key = f"{prefix}/{rel_path}"
-            if Path(rel_path).suffix.lower() in _BINARY_EXTENSIONS:
-                try:
-                    raw_bytes = base64.b64decode(content)
-                except Exception:
-                    raw_bytes = content.encode("utf-8")
+            if is_binary:
+                # /files/read returns JSON (string content) which corrupts binary
+                # data when non-UTF-8 bytes are mangled by JSON encoding. Use the
+                # container's base64 command so the transfer stays pure ASCII.
+                b64_resp = requests.post(
+                    f"{BASE_URL}/execute",
+                    headers=_AUTH_HEADERS,
+                    params={"wait": 30},
+                    json={"command": f"base64 '{abs_path}'"},
+                    timeout=40,
+                )
+                b64_resp.raise_for_status()
+                b64_output = "".join(
+                    item["data"] for item in b64_resp.json().get("output", [])
+                )
+                raw_bytes = base64.b64decode(b64_output.replace("\n", "").strip())
                 storage.write(storage_key, raw_bytes)
             else:
+                file_resp = requests.get(
+                    f"{BASE_URL}/files/read",
+                    headers=_AUTH_HEADERS,
+                    params={"path": abs_path},
+                    timeout=60,
+                )
+                file_resp.raise_for_status()
+                content = file_resp.json().get("content", "")
                 storage.write_text(storage_key, content)
             saved.append(rel_path)
         except Exception as exc:
@@ -219,26 +253,101 @@ async def _sync_from_container(
     return {"saved": saved, "failed": failed}
 
 
+def _find_stray_files(workdir: str) -> list[str]:
+    """List files written outside the thread workdir during a command.
+
+    Scans the parent of ``_CONTAINER_BASE`` (typically ``/tmp``) for any files
+    that do not live under ``_CONTAINER_BASE``. These files are invisible to
+    ``_sync_from_container`` and will be deleted by ``_flush_container_workdir``,
+    so they will not persist to the next call.
+
+    Args:
+        workdir: Absolute container path of the thread workdir
+            (``{_CONTAINER_BASE}/{thread_id}``). Unused directly but accepted
+            for symmetry with other helpers.
+
+    Returns:
+        Sorted list of absolute container paths of stray files.
+        Returns ``[]`` on any error so the caller is never blocked.
+    """
+    workspace_root = PurePosixPath(_CONTAINER_BASE)
+    tmp_parent = str(workspace_root.parent)
+    workspace_name = workspace_root.name
+    find_cmd = (
+        f"find '{tmp_parent}' -type f ! -path '{tmp_parent}/{workspace_name}/*'"
+        f" 2>/dev/null | sort"
+    )
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/execute",
+            headers=_AUTH_HEADERS,
+            params={"wait": 10},
+            json={"command": find_cmd},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = "".join(item["data"] for item in resp.json().get("output", []))
+        return [p.strip() for p in raw.splitlines() if p.strip()]
+    except Exception:
+        return []
+
+
+def _flush_container_workdir(workdir: str) -> None:
+    """Remove the thread-scoped directory and any stray files after a command completes.
+
+    Deletes the thread workdir (``{_CONTAINER_BASE}/{thread_id}``) and then sweeps
+    the parent temp directory for any loose files or subdirectories the agent wrote
+    outside the thread-scoped path (e.g. Python scripts dropped directly into
+    ``/tmp/``). The workspace root (``_CONTAINER_BASE``) itself is preserved so
+    sibling threads are unaffected.
+
+    Args:
+        workdir: Absolute container path to delete (``{_CONTAINER_BASE}/{thread_id}``).
+    """
+    workspace_root = PurePosixPath(_CONTAINER_BASE)
+    tmp_parent = str(workspace_root.parent)
+    workspace_name = workspace_root.name
+    # Delete the thread workdir, then remove everything in the parent tmp dir
+    # except the workspace root (which holds other threads' subdirs).
+    sweep = (
+        f"rm -rf '{workdir}' && "
+        f"find '{tmp_parent}' -mindepth 1 -maxdepth 1 ! -name '{workspace_name}'"
+        f" -exec rm -rf {{}} \\; 2>/dev/null; true"
+    )
+    try:
+        requests.post(
+            f"{BASE_URL}/execute",
+            headers=_AUTH_HEADERS,
+            params={"wait": 10},
+            json={"command": sweep},
+            timeout=15,
+        )
+    except Exception:
+        pass  # non-fatal; stale files are an isolation nuisance, not a correctness error
+
+
 @tool
 async def run_terminal_command(command: str, wait: int = 300, *, config: RunnableConfig) -> str:
     """Execute a shell command inside the open-terminal container and return its output.
 
-    The command runs inside a thread-scoped sandbox directory
-    (``{OPEN_TERMINAL_WORKDIR}/{thread_id}``) so the working directory is
-    always the thread's own workspace. All paths in the command are relative
-    to that workspace unless an absolute path is explicitly used.
+    WORKING DIRECTORY: The shell always works inside the thread-scoped workdir \
+    (/tmp/workspace/<thread_id>). Always use RELATIVE paths such as 'workspace/sections/', \
+    'output/', 'input/'. 
 
-    Before running the command the thread's full workspace is synced to the
-    container. After the command completes, all files in those same container
-    directories — including new or modified ones — are synced back to the
-    workspace.
-
+    SYNC: Before the command, the full thread workspace is copied into the container. After the \
+    command, every file inside the thread workdir is synced back to persistent storage (new files, \
+    edits, and deletes are all captured). Files written OUTSIDE the workdir are NOT synced and \
+    are permanently deleted — a [SYNC WARNING] in the output will name those files. The container \
+    is wiped after every call. Nothing carries over: no env vars, no background processes. 
+    
     Args:
         command: Shell command to run, e.g. ``"ls"`` or ``"python run.py"``.
         wait: Max seconds to wait for the command to finish.
 
     Returns:
-        stdout/stderr output from the command, truncated if very large.
+        Terminal-style output prefixed with ``[workdir]$ command``. Appends a
+        ``[SYNC WARNING]`` block if files were written outside the thread workdir.
+        Output is truncated at 8,000 chars.
     """
     upload_result = await _sync_to_container(config)
     if "error" in upload_result:
@@ -270,6 +379,22 @@ async def run_terminal_command(command: str, wait: int = 300, *, config: Runnabl
         config,
         upload_result["container_dirs"],
         workdir=workdir,
-        skip_rel_paths=set(upload_result["uploaded"]),
     )
-    return _truncate_output(output, label="Terminal output")
+    # --- Detect stray files before the flush erases them ---
+    stray_files = _find_stray_files(workdir)
+    _flush_container_workdir(workdir)
+
+    # --- Format output as a terminal-style block ---
+    cmd_display = command if len(command) <= 120 else command[:117] + "..."
+    result = f"[{workdir}]$ {cmd_display}\n{_truncate_output(output, label='Terminal output')}"
+    if stray_files:
+        stray_list = "\n".join(f"  {p}" for p in stray_files)
+        result += (
+            f"\n\n[SYNC WARNING: The following files were written outside the "
+            f"workspace and have been permanently deleted — they will NOT be "
+            f"available in the next call:\n{stray_list}\n"
+            f"To persist files between calls, write to relative paths inside "
+            f"the workspace (e.g. workspace/, output/). "
+            f"The absolute workspace path is '{workdir}'.]"
+        )
+    return result

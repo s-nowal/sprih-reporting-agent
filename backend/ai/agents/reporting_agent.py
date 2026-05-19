@@ -28,6 +28,7 @@ from langchain.chat_models import init_chat_model
 
 from backend.ai.agents.research_agent import build_research_graph
 from backend.ai.prompts.agents.reporting import get_reporting_prompt
+from backend.ai.tools.compile_results import compile_results
 from backend.ai.tools.user_input import request_user_input
 from backend.ai.tools.terminal_tools import run_terminal_command
 from backend.infra.registry import get_storage
@@ -199,7 +200,7 @@ def build_reporting_graph(
             inner=S3Backend(storage=get_storage(), prefix=workspace_prefix),
             deny_prefixes=["input", "reference", "research"],
         ),
-        tools=[run_terminal_command],
+        tools=[run_terminal_command, compile_results],
         skills=["/skills/"],
         checkpointer=checkpointer,
         system_prompt=get_reporting_prompt(client_type),

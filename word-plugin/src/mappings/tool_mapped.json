@@ -30,5 +30,9 @@
   "task": {
     "name": "Launch Agent",
     "description": "Delegate work to a subagent"
+  },
+  "compile_results": {
+    "name": "Compile Results",
+    "description": "Compile a full report."
   }
 }
