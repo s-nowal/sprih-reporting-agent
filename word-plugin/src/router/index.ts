@@ -9,6 +9,11 @@ export default createRouter({
       component: () => import('../pages/HomePage.vue'),
     },
     {
+      path: '/files',
+      name: 'Files',
+      component: () => import('../pages/FilesPage.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/',
     },

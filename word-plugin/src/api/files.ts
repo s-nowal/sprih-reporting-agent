@@ -28,6 +28,7 @@ export interface FileContent {
   key: string
   content: string
   size: number
+  is_binary?: boolean
 }
 
 export interface WriteResult {

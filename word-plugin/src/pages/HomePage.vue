@@ -148,6 +148,13 @@
           </button>
           <button
             class="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main"
+            title="Files"
+            @click="router.push('/files')"
+          >
+            <Files :size="13" />
+          </button>
+          <button
+            class="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-hover hover:text-main"
             :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'"
             @click="toggleDarkMode"
           >
@@ -810,6 +817,7 @@ import {
   CornerDownRight,
   Download,
   EllipsisVertical,
+  Files,
   FileText,
   History,
   Moon,
@@ -824,6 +832,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { insertFormattedResult } from '@/api/common'
 import { BASE_URL } from '@/api/config'
@@ -885,6 +894,8 @@ function toolCallArgs(name: string, args: Record<string, unknown>): ArgEntry[] {
       truncate: paramMap?.get(k) ?? false,
     }))
 }
+
+const router = useRouter()
 
 const DRIVE_PROMPT_KEY = 'sprih.drivePromptSeen'
 const showDrivePrompt = ref(localStorage.getItem(DRIVE_PROMPT_KEY) !== 'true')

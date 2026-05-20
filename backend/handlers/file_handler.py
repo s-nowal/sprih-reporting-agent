@@ -141,12 +141,18 @@ async def read_file(
     key = _to_storage_key(enterprise_id, thread_id, path)
     if not storage.exists(key):
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
-    content = storage.read_text(key)
-    return FileContent(
-        key=path,
-        content=content,
-        size=len(content.encode("utf-8")),
-    )
+    try:
+        content = storage.read_text(key)
+        return FileContent(key=path, content=content, size=len(content.encode("utf-8")))
+    except UnicodeDecodeError:
+        import base64 as _b64
+        raw = storage.read(key)
+        return FileContent(
+            key=path,
+            content=_b64.b64encode(raw).decode("ascii"),
+            size=len(raw),
+            is_binary=True,
+        )
 
 
 async def write_file(

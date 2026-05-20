@@ -24,11 +24,18 @@ class FileObject(BaseModel):
 
 
 class FileContent(BaseModel):
-    """Body returned by a single-file READ."""
+    """Body returned by a single-file READ.
+
+    For text files, ``content`` is the raw UTF-8 body and ``is_binary`` is
+    ``False``. For binary files (PDF, DOCX, …) that cannot be decoded as
+    UTF-8, ``content`` is a standard base64 string and ``is_binary`` is
+    ``True``.
+    """
 
     key: str
     content: str
     size: int
+    is_binary: bool = False
 
 
 class WriteResult(BaseModel):
