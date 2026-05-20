@@ -468,10 +468,10 @@
                 </div>
                 <!-- Typed text bubble (omitted when the user sent context only) -->
                 <div
-                  v-if="(humanCtx(item.msg)?.displayText ?? getMessageText(item.msg)).trim()"
+                  v-if="(humanCtx(item.msg)?.displayText ?? stripHumanMsg(getMessageText(item.msg))).trim()"
                   class="rounded-sm border border-accent/20 bg-accent/5 px-2 py-1.5 text-[12px] leading-relaxed text-main whitespace-pre-wrap wrap-break-word"
                 >
-                  {{ (humanCtx(item.msg)?.displayText ?? getMessageText(item.msg)).trim() }}
+                  {{ (humanCtx(item.msg)?.displayText ?? stripHumanMsg(getMessageText(item.msg))).trim() }}
                 </div>
               </div>
             </template>
@@ -1144,6 +1144,29 @@ function cleanText(m: AgentMessage): string {
 
 function humanCtx(m: AgentMessage): HumanMsgContext | null {
   return humanMsgContext[getMessageText(m)] ?? null
+}
+
+// Strip internal backend-facing suffixes from a raw human message string.
+// Used as the fallback for historical messages not present in humanMsgContext
+// (e.g. after a page reload). Suffixes are stripped in reverse append order.
+function stripHumanMsg(text: string): string {
+  let s = text
+  // 1. Selected text — appended last, strip first.
+  const selIdx = s.indexOf('\n\nSelected Text:')
+  if (selIdx !== -1) s = s.slice(0, selIdx)
+  else if (s.startsWith('Selected Text:')) s = ''
+  // 2. Sync suffix.
+  if (s.includes('\n\n' + SYNC_SUFFIX)) s = s.slice(0, s.indexOf('\n\n' + SYNC_SUFFIX))
+  else if (s === SYNC_SUFFIX) s = ''
+  // 3. File reference suffixes (inline with \n\n, or as the entire text).
+  const fr1 = 'I have put the reference file at this location:'
+  const fr2 = 'I have put the reference files at these locations:'
+  const fi1 = s.indexOf('\n\n' + fr1)
+  const fi2 = s.indexOf('\n\n' + fr2)
+  if (fi1 !== -1) s = s.slice(0, fi1)
+  if (fi2 !== -1) s = s.slice(0, fi2)
+  if (s.startsWith(fr1) || s.startsWith(fr2)) s = ''
+  return s.trim()
 }
 
 // Split AI content into [text, think, text, …] segments so we can render
