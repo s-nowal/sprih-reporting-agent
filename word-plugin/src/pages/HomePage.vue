@@ -831,7 +831,7 @@ import {
   Wrench,
   X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, Reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { insertFormattedResult } from '@/api/common'
@@ -1377,8 +1377,8 @@ function buildMessageWithFileReferences(
   const lines = uploaded.map((u) => `- ${u.key}`).join('\n')
   const suffix =
     uploaded.length === 1
-      ? `I have put the reference file at this location: ${uploaded[0].key}`
-      : `I have put the reference files at these locations:\n${lines}`
+      ? `I have put the reference file at this location: ${uploaded[0].key}. Check /workspace/parsed for parsed version of this file.`
+      : `I have put the reference files at these locations:\n${lines}. Check /workspace/parsed for parsed version of these files.`
   return typed ? `${typed}\n\n${suffix}` : suffix
 }
 

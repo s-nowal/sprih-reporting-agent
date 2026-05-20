@@ -72,6 +72,9 @@ Store intermediate files in Markdown or JSON format using the write_file tool.
 Always include source URLs alongside any research material — every fact must \
 be traceable to its origin.
 
+Note: User cannot see workspace/ folder. Do not reference files produced in workspace/
+folder during the chat.
+
 ---
 
 # Report Generation Workflow

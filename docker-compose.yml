@@ -39,28 +39,28 @@ services:
       OPEN_TERMINAL_API_KEY: ${OPEN_TERMINAL_API_KEY:-}
     restart: unless-stopped
 
-  api:
-    build: .
-    ports:
-      - "80:80"
-      - "8000:8000"
-    env_file: .env
-    environment:
-      # Override localhost defaults so the app reaches sibling containers
-      SPRIH_DB_HOST: mariadb
-      OPEN_TERMINAL_URL: http://open-terminal:8000
-    volumes:
-      - api_data:/app/data
-    depends_on:
-      mariadb:
-        condition: service_healthy
-      neo4j:
-        condition: service_started
-      qdrant:
-        condition: service_started
-      open-terminal:
-        condition: service_started
-    restart: unless-stopped
+  # api:
+  #   build: .
+  #   ports:
+  #     - "80:80"
+  #     - "8000:8000"
+  #   env_file: .env
+  #   environment:
+  #     # Override localhost defaults so the app reaches sibling containers
+  #     SPRIH_DB_HOST: mariadb
+  #     OPEN_TERMINAL_URL: http://open-terminal:8000
+  #   volumes:
+  #     - api_data:/app/data
+  #   depends_on:
+  #     mariadb:
+  #       condition: service_healthy
+  #     neo4j:
+  #       condition: service_started
+  #     qdrant:
+  #       condition: service_started
+  #     open-terminal:
+  #       condition: service_started
+  #   restart: unless-stopped
 
 volumes:
   mariadb_data:
