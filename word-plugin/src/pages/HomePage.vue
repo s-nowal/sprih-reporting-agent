@@ -831,7 +831,7 @@ import {
   Wrench,
   X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, Reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, Reactive, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { insertFormattedResult } from '@/api/common'
